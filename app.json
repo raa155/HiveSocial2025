@@ -23,7 +23,10 @@
         "NSLocationAlwaysUsageDescription": "HiveSocial uses your location to help you find nearby people with similar interests.",
         "NSPhotoLibraryUsageDescription": "HiveSocial needs access to your photos to let you update your profile picture.",
         "NSCameraUsageDescription": "HiveSocial needs access to your camera to take a profile picture.",
-        "UIBackgroundModes": ["location", "fetch"]
+        "UIBackgroundModes": [
+          "location",
+          "fetch"
+        ]
       },
       "config": {
         "googleMapsApiKey": "YOUR_GOOGLE_MAPS_API_KEY"
@@ -71,7 +74,15 @@
         {
           "photosPermission": "HiveSocial needs access to your photos to let you update your profile picture."
         }
-      ]
+      ],
+      [
+        "expo-video",
+        {
+          "supportsBackgroundPlayback": true,
+          "supportsPictureInPicture": true
+        }
+      ],
+      "expo-audio"
     ],
     "experiments": {
       "typedRoutes": true

@@ -21,9 +21,9 @@ interface EnhancedUserMapMarkerProps {
  * Enhanced map marker component for displaying users on the map with tier-based styling
  */
 const EnhancedUserMapMarker: React.FC<EnhancedUserMapMarkerProps> = ({ 
-  photoURL, 
+  photoURL = null, 
   distance, 
-  name, 
+  name = '', 
   tier = 'casual',
   sharedInterestsCount = 0,
   online = false,
@@ -52,16 +52,16 @@ const EnhancedUserMapMarker: React.FC<EnhancedUserMapMarkerProps> = ({
       // Set up a timeout to stop tracking view changes after image loads
       const viewChangesTimeout = setTimeout(() => {
         if (tracksViewChanges) {
-          console.log('Setting tracksViewChanges to false for:', name);
+          console.log(`Setting tracksViewChanges to false for: ${name || 'unnamed user'}`);
           setTracksViewChanges(false);
         }
       }, 2000);
 
       // Prefetch image to pre-cache
       if (photoURL) {
-        console.log('Prefetching image for marker:', name);
+        console.log(`Prefetching image for marker: ${name || 'unnamed user'}`);
         Image.prefetch(photoURL).catch(err => {
-          console.log('Prefetch error:', err);
+          console.log(`Prefetch error: ${err}`);
         });
       }
       
@@ -75,7 +75,7 @@ const EnhancedUserMapMarker: React.FC<EnhancedUserMapMarkerProps> = ({
   useEffect(() => {
     if (photoURL && imageError && retryCount.current < 3) {
       const retryTimeout = setTimeout(() => {
-        console.log(`Retry ${retryCount.current + 1} loading image for:`, name);
+        console.log(`Retry ${retryCount.current + 1} loading image for: ${name || 'unnamed user'}`);
         retryCount.current += 1;
         setImageKey(Date.now().toString());
         setImageError(false);
@@ -88,7 +88,7 @@ const EnhancedUserMapMarker: React.FC<EnhancedUserMapMarkerProps> = ({
 
   // Handle image load success
   const handleImageLoad = () => {
-    console.log('Image loaded successfully for:', name);
+    console.log(`Image loaded successfully for: ${name || 'unnamed user'}`);
     setImageLoaded(true);
     setImageError(false);
     setIsLoading(false);
@@ -101,7 +101,7 @@ const EnhancedUserMapMarker: React.FC<EnhancedUserMapMarkerProps> = ({
 
   // Handle image load error
   const handleImageError = (error) => {
-    console.error('Image load error for user:', name, error?.nativeEvent?.error || 'Unknown error');
+    console.error(`Image load error for user: ${name || 'unnamed user'}, ${error?.nativeEvent?.error || 'Unknown error'}`);
     setImageError(true);
     setIsLoading(false);
   };
@@ -230,7 +230,7 @@ const EnhancedUserMapMarker: React.FC<EnhancedUserMapMarkerProps> = ({
       {/* Display the number of shared interests */}
       {sharedInterestsCount > 0 && (
         <View style={[styles.interestBadge, { backgroundColor: markerColor }]}>
-          <Text style={styles.interestCount}>{sharedInterestsCount}</Text>
+          <Text style={styles.interestCount}>{`${sharedInterestsCount}`}</Text>
         </View>
       )}
       
@@ -240,9 +240,9 @@ const EnhancedUserMapMarker: React.FC<EnhancedUserMapMarkerProps> = ({
       )}
       
       {/* Display distance if available */}
-      {distance && (
+      {distance !== null && distance !== undefined && (
         <View style={[styles.distanceContainer, { backgroundColor: `${markerColor}CC` }]}>
-          <Text style={styles.distanceText}>{distance}m</Text>
+          <Text style={styles.distanceText}>{`${distance}m`}</Text>
         </View>
       )}
     </View>

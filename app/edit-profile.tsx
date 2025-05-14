@@ -135,7 +135,7 @@ export default function EditProfileScreen() {
   const pickImage = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.7,
@@ -167,7 +167,7 @@ export default function EditProfileScreen() {
       // For Android, we need to explicitly set selectionLimit to avoid the bug
       // where multiple images are selected when only one was picked
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsMultipleSelection: true,
         selectionLimit: remainingSlots,
         quality: 0.7,

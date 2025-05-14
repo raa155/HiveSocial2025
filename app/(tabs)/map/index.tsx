@@ -79,7 +79,11 @@ export default function MapScreen() {
   const [filters, setFilters] = useState({
     selectedInterests: [],
     minSharedInterests: 1,
-    onlineOnly: false
+    onlineOnly: false,
+    ageRange: [18, 99],
+    selectedGender: "Any",
+    activityStatus: "Any",
+    lookingFor: "Any"
   });
   const [filtersActive, setFiltersActive] = useState(false);
   
@@ -222,7 +226,12 @@ export default function MapScreen() {
     const isActive = 
       filters.selectedInterests.length > 0 || 
       filters.minSharedInterests > 1 ||
-      filters.onlineOnly;
+      filters.onlineOnly ||
+      filters.ageRange[0] > 18 ||
+      filters.ageRange[1] < 99 ||
+      filters.selectedGender !== "Any" ||
+      filters.activityStatus !== "Any" ||
+      filters.lookingFor !== "Any";
     
     setFiltersActive(isActive);
   }, [filters, nearbyUsers]);
@@ -296,7 +305,11 @@ export default function MapScreen() {
     console.log('Applying filters:', {
       interestsCount: filters.selectedInterests.length,
       minShared: filters.minSharedInterests,
-      onlineOnly: filters.onlineOnly
+      onlineOnly: filters.onlineOnly,
+      ageRange: filters.ageRange,
+      gender: filters.selectedGender,
+      activityStatus: filters.activityStatus,
+      lookingFor: filters.lookingFor
     });
     
     let filtered = [...users];
@@ -321,6 +334,47 @@ export default function MapScreen() {
     // Filter by online status
     if (filters.onlineOnly) {
       filtered = filtered.filter(user => user.online === true);
+    }
+    
+    // Filter by age range (if user has age property)
+    filtered = filtered.filter(user => {
+      if (!user.age) return true; // Include users without age data
+      return user.age >= filters.ageRange[0] && user.age <= filters.ageRange[1];
+    });
+    
+    // Filter by gender
+    if (filters.selectedGender !== "Any") {
+      filtered = filtered.filter(user => {
+        if (!user.gender) return false; // Exclude users without gender data
+        return user.gender === filters.selectedGender;
+      });
+    }
+    
+    // Filter by activity status
+    if (filters.activityStatus === "Recently active") {
+      filtered = filtered.filter(user => {
+        if (!user.lastActive) return false;
+        // Consider recently active if active in the last 24 hours
+        const oneDayAgo = new Date();
+        oneDayAgo.setDate(oneDayAgo.getDate() - 1);
+        return new Date(user.lastActive) >= oneDayAgo;
+      });
+    } else if (filters.activityStatus === "New users") {
+      filtered = filtered.filter(user => {
+        if (!user.createdAt) return false;
+        // Consider new if account created in the last 7 days
+        const oneWeekAgo = new Date();
+        oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+        return new Date(user.createdAt) >= oneWeekAgo;
+      });
+    }
+    
+    // Filter by "looking for"
+    if (filters.lookingFor !== "Any") {
+      filtered = filtered.filter(user => {
+        if (!user.lookingFor || !Array.isArray(user.lookingFor)) return false;
+        return user.lookingFor.includes(filters.lookingFor);
+      });
     }
     
     // Apply the offset algorithm to prevent overlapping markers
@@ -738,7 +792,12 @@ export default function MapScreen() {
               sharedInterests: [],
               sharedInterestsCount: 0,
               tier: 'casual', // Default tier
-              online: onlineUsers.has(data.uid) // Check if user is online
+              online: onlineUsers.has(data.uid), // Check if user is online
+              age: null,
+              gender: null,
+              lookingFor: [],
+              lastActive: data.lastSeen ? new Date(data.lastSeen.toDate()) : null,
+              createdAt: null
             };
             
             users.push(userObj);
@@ -798,6 +857,10 @@ export default function MapScreen() {
                 userObj.name = profile.name || 'Anonymous User';
                 userObj.bio = profile.bio || null;
                 userObj.interests = profile.interests || [];
+                userObj.age = profile.age || null;
+                userObj.gender = profile.gender || null;
+                userObj.lookingFor = profile.lookingFor || [];
+                userObj.createdAt = profile.createdAt ? new Date(profile.createdAt.toDate()) : null;
                 
                 // Load profile images if available
                 if (profile.profileImages && Array.isArray(profile.profileImages)) {
@@ -968,6 +1031,43 @@ export default function MapScreen() {
     }));
   };
   
+  // Handle age range change
+  const handleAgeRangeChange = (value) => {
+    setFilters(prev => ({
+      ...prev,
+      ageRange: value
+    }));
+  };
+  
+  // Handle gender selection change
+  const handleGenderChange = (value) => {
+    setFilters(prev => ({
+      ...prev,
+      selectedGender: value
+    }));
+  };
+  
+  // Handle activity status change
+  const handleActivityStatusChange = (value) => {
+    setFilters(prev => ({
+      ...prev,
+      activityStatus: value
+    }));
+  };
+  
+  // Handle looking for change
+  const handleLookingForChange = (value) => {
+    setFilters(prev => ({
+      ...prev,
+      lookingFor: value
+    }));
+  };
+  
+  // Handle loading preset
+  const handleLoadPreset = (presetFilters) => {
+    setFilters(presetFilters);
+  };
+  
   // Function to get safe area insets
   const getSafeAreaInsets = () => {
     // On iOS, the status bar height is typically around 44pt
@@ -1098,12 +1198,12 @@ export default function MapScreen() {
                   onPress={() => handleMarkerPress(nearbyUser)}
                 >
                   <EnhancedUserMapMarker
-                    photoURL={nearbyUser.photoURL}
-                    distance={nearbyUser.distance}
-                    name={nearbyUser.name}
-                    tier={nearbyUser.tier}
-                    sharedInterestsCount={nearbyUser.sharedInterestsCount}
-                    online={nearbyUser.online}
+                    photoURL={nearbyUser.photoURL || null}
+                    distance={nearbyUser.distance || 0}
+                    name={nearbyUser.name || ''}
+                    tier={nearbyUser.tier || 'casual'}
+                    sharedInterestsCount={nearbyUser.sharedInterestsCount || 0}
+                    online={nearbyUser.online || false}
                   />
                 </Marker>
               );
@@ -1129,6 +1229,11 @@ export default function MapScreen() {
             onInterestToggle={handleInterestToggle}
             onMinSharedInterestsChange={handleMinSharedInterestsChange}
             onOnlineOnlyToggle={handleOnlineOnlyToggle}
+            onAgeRangeChange={handleAgeRangeChange}
+            onGenderChange={handleGenderChange}
+            onActivityStatusChange={handleActivityStatusChange}
+            onLookingForChange={handleLookingForChange}
+            onLoadPreset={handleLoadPreset}
             drawerAnimation={filterDrawerAnimation}
           />
           
@@ -1217,7 +1322,11 @@ export default function MapScreen() {
                   [
                     filters.minSharedInterests > 1 ? `Min ${filters.minSharedInterests} shared interests` : '',
                     filters.selectedInterests.length > 0 ? `${filters.selectedInterests.length} interests selected` : '',
-                    filters.onlineOnly ? 'Online only' : ''
+                    filters.onlineOnly ? 'Online only' : '',
+                    filters.ageRange[0] > 18 || filters.ageRange[1] < 99 ? `Age ${filters.ageRange[0]}-${filters.ageRange[1]}` : '',
+                    filters.selectedGender !== "Any" ? `${filters.selectedGender}` : '',
+                    filters.activityStatus !== "Any" ? `${filters.activityStatus}` : '',
+                    filters.lookingFor !== "Any" ? `Looking for: ${filters.lookingFor}` : ''
                   ].filter(Boolean).join(', ')
                 }
               </Text>
