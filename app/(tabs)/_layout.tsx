@@ -1,21 +1,14 @@
 import React, { useEffect } from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Link, Tabs, usePathname, useRouter } from 'expo-router';
-import { Pressable, Platform } from 'react-native';
+import { Pressable, Platform, StyleSheet, View } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import LoadingScreen from '@/components/screens/LoadingScreen';
+import FloatingTabBar from '@/components/navigation/FloatingTabBar';
 
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
-
-// You can explore the built-in icon families and icons on the web at https://icons.expo.fyi/
-function TabBarIcon(props: {
-  name: React.ComponentProps<typeof FontAwesome>['name'];
-  color: string;
-}) {
-  return <FontAwesome size={28} style={{ marginBottom: -3 }} {...props} />;
-}
 
 export const unstable_settings = {
   // Set the initial route name
@@ -50,95 +43,135 @@ export default function TabLayout() {
   }
   
   return (
-    <Tabs
-      screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
-        // Disable the static render of the header on web
-        // to prevent a hydration error in React Navigation v6.
-        headerShown: useClientOnlyValue(false, true),
-      }}
-    >
-      {/* The tab to hide */}
-      <Tabs.Screen
-        name="index"
-        options={{
-          href: null,
-        }}
-        listeners={{
-          tabPress: e => {
-            console.log('Tabs index pressed');
+    <View style={styles.container}>
+      <Tabs
+        screenOptions={{
+          tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+          headerShown: useClientOnlyValue(false, true),
+          tabBarStyle: { 
+            display: 'none' // Hide the default tab bar since we're using the floating tab bar
           },
-        }}
-      />
-      
-      <Tabs.Screen
-        name="map/index"
-        options={{
-          title: 'Map',
-          tabBarIcon: ({ color }) => <TabBarIcon name="map" color={color} />,
-        }}
-        listeners={{
-          tabPress: e => {
-            console.log('Map tab pressed');
+          headerStyle: {
+            backgroundColor: Colors[colorScheme ?? 'light'].background,
+            elevation: 0,
+            shadowOpacity: 0,
+            borderBottomWidth: 0,
           },
-          focus: () => {
-            console.log('Map tab focused');
+          headerTitleStyle: {
+            fontWeight: '600',
+            fontSize: 18,
           },
+          headerTitleAlign: 'center',
+          headerShadowVisible: false,
         }}
-      />
-      
-      <Tabs.Screen
-        name="connections/index"
-        options={{
-          title: 'Connections',
-          tabBarIcon: ({ color }) => <TabBarIcon name="users" color={color} />,
-        }}
-        listeners={{
-          tabPress: e => {
-            console.log('Connections tab pressed');
-          },
-        }}
-      />
-      
-      <Tabs.Screen
-        name="chat/index"
-        options={{
-          title: 'Chat',
-          tabBarIcon: ({ color }) => <TabBarIcon name="comments" color={color} />,
-        }}
-        listeners={{
-          tabPress: e => {
-            console.log('Chat tab pressed');
-          },
-        }}
-      />
-      
-      <Tabs.Screen
-        name="profile/index"
-        options={{
-          title: 'Profile',
-          tabBarIcon: ({ color }) => <TabBarIcon name="user" color={color} />,
-          headerRight: () => (
-            <Link href="/settings" asChild>
-              <Pressable>
-                {({ pressed }) => (
-                  <FontAwesome
-                    name="cog"
-                    size={25}
-                    color={Colors[colorScheme ?? 'light'].text}
-                    style={{ marginRight: 15, opacity: pressed ? 0.5 : 1 }}
-                  />
-                )}
-              </Pressable>
-            </Link>
-          ),
-        }}
-        listeners={{
-          tabPress: e => {
-            console.log('Profile tab pressed');
-          },
-        }}
-      />
-    </Tabs>
+        tabBar={props => <FloatingTabBar {...props} />}
+      >
+        {/* The tab to hide - not visible in tab bar */}
+        <Tabs.Screen
+          name="index"
+          options={{
+            href: null,
+          }}
+          listeners={{
+            tabPress: e => {
+              console.log('Tabs index pressed');
+            },
+          }}
+        />
+        
+        <Tabs.Screen
+          name="map/index"
+          options={{
+            title: 'Map',
+            tabBarIcon: ({ color, size, focused }) => (
+              <FontAwesome name="map" size={size} color={color} />
+            ),
+          }}
+          listeners={{
+            tabPress: e => {
+              console.log('Map tab pressed');
+            },
+            focus: () => {
+              console.log('Map tab focused');
+            },
+          }}
+        />
+        
+        <Tabs.Screen
+          name="connections/index"
+          options={{
+            title: 'Connections',
+            tabBarIcon: ({ color, size, focused }) => (
+              <FontAwesome name="users" size={size} color={color} />
+            ),
+          }}
+          listeners={{
+            tabPress: e => {
+              console.log('Connections tab pressed');
+            },
+          }}
+        />
+        
+        <Tabs.Screen
+          name="chat/index"
+          options={{
+            title: 'Chat',
+            tabBarIcon: ({ color, size, focused }) => (
+              <FontAwesome name="comments" size={size} color={color} />
+            ),
+          }}
+          listeners={{
+            tabPress: e => {
+              console.log('Chat tab pressed');
+            },
+          }}
+        />
+        
+        <Tabs.Screen
+          name="profile/index"
+          options={{
+            title: 'Profile',
+            tabBarIcon: ({ color, size, focused }) => (
+              <FontAwesome name="user" size={size} color={color} />
+            ),
+            headerRight: () => (
+              <Link href="/settings" asChild>
+                <Pressable style={styles.headerButton}>
+                  {({ pressed }) => (
+                    <FontAwesome
+                      name="cog"
+                      size={22}
+                      color={Colors[colorScheme ?? 'light'].text}
+                      style={{ opacity: pressed ? 0.5 : 1 }}
+                    />
+                  )}
+                </Pressable>
+              </Link>
+            ),
+          }}
+          listeners={{
+            tabPress: e => {
+              console.log('Profile tab pressed');
+            },
+          }}
+        />
+      </Tabs>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    margin: 0,
+    padding: 0,
+  },
+  headerButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+    borderRadius: 20,
+  },
+});
