@@ -34,54 +34,73 @@ export function useUserPresence() {
         return;
       }
       
-      // Initialize both databases
-      const firestore = db;
-      const rtdb = database;
-      
       try {
         console.log('Setting up presence system for user:', user.uid);
         
         // 1. Setup Firestore presence
-        const userPresenceRef = doc(firestore, 'presence', user.uid);
+        const userPresenceRef = doc(db, 'presence', user.uid);
         
-        // 2. Setup Realtime Database presence (more reliable for disconnect detection)
-        const rtdbPresenceRef = ref(rtdb, `online/${user.uid}`);
-        const connectedRef = ref(rtdb, '.info/connected');
-
         // Update Firestore with initial online status
         await setDoc(userPresenceRef, {
           online: true,
           lastSeen: serverTimestamp(),
           updatedAt: serverTimestamp()
         }, { merge: true });
-
-        // Handle realtime database connection state
-        onValue(connectedRef, async (snapshot) => {
-          if (snapshot.val() === true) {
-            console.log('Connected to Firebase Realtime Database');
+        
+        // 2. Setup Realtime Database presence (more reliable for disconnect detection)
+        if (database) {
+          try {
+            // Initialize Realtime Database references
+            const rtdbPresenceRef = ref(database, `online/${user.uid}`);
+            const connectedRef = ref(database, '.info/connected');
             
-            // User is online in RTDB
-            await set(rtdbPresenceRef, {
-              online: true,
-              lastSeen: new Date().toISOString()
+            // Handle realtime database connection state
+            const unsubscribe = onValue(connectedRef, async (snapshot) => {
+              try {
+                if (snapshot.val() === true) {
+                  console.log('Connected to Firebase Realtime Database');
+                  
+                  // User is online in RTDB
+                  await set(rtdbPresenceRef, {
+                    online: true,
+                    lastSeen: new Date().toISOString()
+                  });
+                  
+                  // Setup disconnect handling for RTDB
+                  rtdbOnDisconnect(rtdbPresenceRef).update({
+                    online: false,
+                    lastSeen: new Date().toISOString()
+                  });
+                  
+                  // Update Firestore status as well
+                  await setDoc(userPresenceRef, {
+                    online: true,
+                    lastSeen: serverTimestamp(),
+                    updatedAt: serverTimestamp()
+                  }, { merge: true });
+                } else {
+                  console.log('Disconnected from Firebase Realtime Database');
+                }
+              } catch (error) {
+                console.error('Error in onValue callback:', error);
+              }
+            }, (error) => {
+              console.error('onValue error:', error);
             });
             
-            // Setup disconnect handling for RTDB
-            rtdbOnDisconnect(rtdbPresenceRef).update({
-              online: false,
-              lastSeen: new Date().toISOString()
-            });
+            // Cleanup function to remove the listener when component unmounts
+            return () => {
+              unsubscribe();
+            };
+          } catch (error) {
+            console.error('Error setting up RTDB presence:', error);
             
-            // Update Firestore status as well
-            await setDoc(userPresenceRef, {
-              online: true,
-              lastSeen: serverTimestamp(),
-              updatedAt: serverTimestamp()
-            }, { merge: true });
-          } else {
-            console.log('Disconnected from Firebase Realtime Database');
+            // Fallback to Firestore only if RTDB fails
+            console.log('Falling back to Firestore-only presence');
           }
-        });
+        } else {
+          console.error('Realtime Database not initialized. Using Firestore-only presence.');
+        }
         
         // Mark as initialized
         initialized.current = true;
@@ -96,12 +115,6 @@ export function useUserPresence() {
       const user = auth.currentUser;
       if (!user) return;
       
-      // Get references
-      const firestore = db;
-      const rtdb = database;
-      const userPresenceRef = doc(firestore, 'presence', user.uid);
-      const rtdbPresenceRef = ref(rtdb, `online/${user.uid}`);
-      
       console.log('App state changed from', appState.current, 'to', nextAppState);
       
       // App going to background or inactive
@@ -113,16 +126,26 @@ export function useUserPresence() {
         
         // Update presence status
         try {
+          // Update in Firestore
+          const userPresenceRef = doc(db, 'presence', user.uid);
           await setDoc(userPresenceRef, {
             online: false,
             lastSeen: serverTimestamp(),
             updatedAt: serverTimestamp()
           }, { merge: true });
           
-          await set(rtdbPresenceRef, {
-            online: false,
-            lastSeen: new Date().toISOString()
-          });
+          // Update in RTDB if available
+          if (database) {
+            try {
+              const rtdbPresenceRef = ref(database, `online/${user.uid}`);
+              await set(rtdbPresenceRef, {
+                online: false,
+                lastSeen: new Date().toISOString()
+              });
+            } catch (error) {
+              console.error('RTDB update error on background:', error);
+            }
+          }
         } catch (error) {
           console.error('Error updating presence on app background:', error);
         }
@@ -136,22 +159,32 @@ export function useUserPresence() {
         
         // Update presence status
         try {
+          // Update in Firestore
+          const userPresenceRef = doc(db, 'presence', user.uid);
           await setDoc(userPresenceRef, {
             online: true,
             lastSeen: serverTimestamp(),
             updatedAt: serverTimestamp()
           }, { merge: true });
           
-          await set(rtdbPresenceRef, {
-            online: true,
-            lastSeen: new Date().toISOString()
-          });
-          
-          // Setup disconnect handler again
-          rtdbOnDisconnect(rtdbPresenceRef).update({
-            online: false,
-            lastSeen: new Date().toISOString()
-          });
+          // Update in RTDB if available
+          if (database) {
+            try {
+              const rtdbPresenceRef = ref(database, `online/${user.uid}`);
+              await set(rtdbPresenceRef, {
+                online: true,
+                lastSeen: new Date().toISOString()
+              });
+              
+              // Setup disconnect handler again
+              rtdbOnDisconnect(rtdbPresenceRef).update({
+                online: false,
+                lastSeen: new Date().toISOString()
+              });
+            } catch (error) {
+              console.error('RTDB update error on foreground:', error);
+            }
+          }
         } catch (error) {
           console.error('Error updating presence on app foreground:', error);
         }
@@ -178,10 +211,8 @@ export function useUserPresence() {
       
       // Update presence status
       try {
-        const firestore = db;
-        const rtdb = database;
-        const userPresenceRef = doc(firestore, 'presence', user.uid);
-        const rtdbPresenceRef = ref(rtdb, `online/${user.uid}`);
+        // Update in Firestore
+        const userPresenceRef = doc(db, 'presence', user.uid);
         
         // If reconnected
         if (connected) {
@@ -193,16 +224,24 @@ export function useUserPresence() {
             updatedAt: serverTimestamp()
           }, { merge: true });
           
-          await set(rtdbPresenceRef, {
-            online: true,
-            lastSeen: new Date().toISOString()
-          });
-          
-          // Setup disconnect handler again
-          rtdbOnDisconnect(rtdbPresenceRef).update({
-            online: false,
-            lastSeen: new Date().toISOString()
-          });
+          // Update in RTDB if available
+          if (database) {
+            try {
+              const rtdbPresenceRef = ref(database, `online/${user.uid}`);
+              await set(rtdbPresenceRef, {
+                online: true,
+                lastSeen: new Date().toISOString()
+              });
+              
+              // Setup disconnect handler again
+              rtdbOnDisconnect(rtdbPresenceRef).update({
+                online: false,
+                lastSeen: new Date().toISOString()
+              });
+            } catch (error) {
+              console.error('RTDB update error on reconnect:', error);
+            }
+          }
         } 
         // If disconnected
         else {
@@ -214,10 +253,18 @@ export function useUserPresence() {
             updatedAt: serverTimestamp()
           }, { merge: true });
           
-          await set(rtdbPresenceRef, {
-            online: false,
-            lastSeen: new Date().toISOString()
-          });
+          // Update in RTDB if available
+          if (database) {
+            try {
+              const rtdbPresenceRef = ref(database, `online/${user.uid}`);
+              await set(rtdbPresenceRef, {
+                online: false,
+                lastSeen: new Date().toISOString()
+              });
+            } catch (error) {
+              console.error('RTDB update error on disconnect:', error);
+            }
+          }
         }
       } catch (error) {
         console.error('Error updating presence on connectivity change:', error);

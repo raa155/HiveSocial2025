@@ -28,6 +28,8 @@ let database;
 // Check if app is already initialized
 if (getApps().length === 0) {
   console.log('Initializing Firebase app and authentication...');
+  
+  // Initialize the Firebase app first
   app = initializeApp(firebaseConfig);
   
   // Initialize auth with AsyncStorage for persistence
@@ -35,19 +37,27 @@ if (getApps().length === 0) {
     persistence: getReactNativePersistence(AsyncStorage)
   });
   
+  // Initialize Firestore and Storage
   db = getFirestore(app);
   storage = getStorage(app);
+  
+  // Initialize Realtime Database explicitly with URL
+  console.log('Initializing Realtime Database with URL:', firebaseConfig.databaseURL);
   database = getDatabase(app);
   
   console.log('Firebase initialized with persistence');
 } else {
+  console.log('Using existing Firebase instance');
   app = getApp();
   auth = getAuth(app);
   db = getFirestore(app);
   storage = getStorage(app);
-  database = getDatabase(app);
   
-  console.log('Using existing Firebase instance');
+  // Get the database with the same URL to ensure consistency
+  console.log('Getting existing Realtime Database instance');
+  database = getDatabase(app);
 }
+
+export { app, auth, db, storage, database };
 
 export { app, auth, db, storage, database };
