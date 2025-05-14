@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "224390534339",
+    "project_id": "hivesocial-75456",
+    "storage_bucket": "hivesocial-75456.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:224390534339:android:2df441d00697ee7165fe76",
+        "android_client_info": {
+          "package_name": "com.romanabad.hivesocial"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCDA03q2JGfIIn8OHymsAgVaUXOgypaYOM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

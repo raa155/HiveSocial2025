@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "hivesocial",
+    "name": "HiveSocial",
     "slug": "hivesocial",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -14,12 +14,40 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.romanabad.hivesocial",
+      "googleServicesFile": "./ios/GoogleService-Info.plist",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "HiveSocial uses your location to help you find nearby people with similar interests.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "HiveSocial uses your location to help you find nearby people with similar interests.",
+        "NSLocationAlwaysUsageDescription": "HiveSocial uses your location to help you find nearby people with similar interests.",
+        "NSPhotoLibraryUsageDescription": "HiveSocial needs access to your photos to let you update your profile picture.",
+        "NSCameraUsageDescription": "HiveSocial needs access to your camera to take a profile picture.",
+        "UIBackgroundModes": ["location", "fetch"]
+      },
+      "config": {
+        "googleMapsApiKey": "YOUR_GOOGLE_MAPS_API_KEY"
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
+      },
+      "package": "com.romanabad.hivesocial",
+      "googleServicesFile": "./android/app/google-services.json",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "CAMERA"
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "YOUR_GOOGLE_MAPS_API_KEY"
+        }
       },
       "edgeToEdgeEnabled": true
     },
@@ -29,7 +57,21 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "HiveSocial uses your location to help you find nearby people with similar interests.",
+          "locationAlwaysPermission": "HiveSocial uses your location to help you find nearby people with similar interests.",
+          "locationWhenInUsePermission": "HiveSocial uses your location to help you find nearby people with similar interests."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "HiveSocial needs access to your photos to let you update your profile picture."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
