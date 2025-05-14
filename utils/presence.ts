@@ -4,9 +4,9 @@
 
 import { useEffect, useRef } from 'react';
 import { AppState, AppStateStatus, Platform } from 'react-native';
-import { db, auth } from '@/config/firebase';
+import { db, auth, database } from '@/config/firebase';
 import { doc, setDoc, serverTimestamp, collection, onSnapshot } from '@firebase/firestore';
-import { getDatabase, ref, set, onValue, onDisconnect as rtdbOnDisconnect } from '@firebase/database';
+import { ref, set, onValue, onDisconnect as rtdbOnDisconnect } from '@firebase/database';
 // NetInfo dependency is commented out since it wasn't successfully installed
 // import NetInfo from '@react-native-community/netinfo';
 
@@ -36,7 +36,7 @@ export function useUserPresence() {
       
       // Initialize both databases
       const firestore = db;
-      const rtdb = getDatabase();
+      const rtdb = database;
       
       try {
         console.log('Setting up presence system for user:', user.uid);
@@ -98,7 +98,7 @@ export function useUserPresence() {
       
       // Get references
       const firestore = db;
-      const rtdb = getDatabase();
+      const rtdb = database;
       const userPresenceRef = doc(firestore, 'presence', user.uid);
       const rtdbPresenceRef = ref(rtdb, `online/${user.uid}`);
       
@@ -179,7 +179,7 @@ export function useUserPresence() {
       // Update presence status
       try {
         const firestore = db;
-        const rtdb = getDatabase();
+        const rtdb = database;
         const userPresenceRef = doc(firestore, 'presence', user.uid);
         const rtdbPresenceRef = ref(rtdb, `online/${user.uid}`);
         
