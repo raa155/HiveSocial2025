@@ -59,5 +59,3 @@ if (getApps().length === 0) {
 }
 
 export { app, auth, db, storage, database };
-
-export { app, auth, db, storage, database };
