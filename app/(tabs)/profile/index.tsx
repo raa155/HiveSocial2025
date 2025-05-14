@@ -25,9 +25,13 @@ import { auth, db } from '@/config/firebase';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { BlurView } from 'expo-blur';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_PADDING = 20;
+
+// Tabbed navigation menu height calculation
+const TAB_BAR_HEIGHT = Platform.OS === 'ios' ? 83 : 70; // Height including safe area insets on iOS
 
 export default function ProfileScreen() {
   const { userData, user, refreshUserData } = useAuth();
@@ -35,6 +39,7 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(false);
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
+  const insets = useSafeAreaInsets();
   
   // Animation values
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -107,7 +112,11 @@ export default function ProfileScreen() {
       
       <Animated.ScrollView 
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          // Add bottom padding to account for the tab bar
+          { paddingBottom: TAB_BAR_HEIGHT + 20 }
+        ]}
         showsVerticalScrollIndicator={false}
         onScroll={Animated.event(
           [{ nativeEvent: { contentOffset: { y: scrollY } } }],
@@ -291,7 +300,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: 40,
+    paddingBottom: 40, // This will be overridden by the inline style
   },
   animatedHeader: {
     position: 'absolute',

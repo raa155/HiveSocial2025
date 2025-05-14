@@ -1,5 +1,17 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, Text, ActivityIndicator, TouchableOpacity, Alert, Platform, Image, Modal } from 'react-native';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { 
+  StyleSheet, 
+  View, 
+  Text, 
+  ActivityIndicator, 
+  TouchableOpacity, 
+  Alert, 
+  Platform, 
+  Image, 
+  Animated,
+  Dimensions,
+  Switch
+} from 'react-native';
 import MapView, { PROVIDER_GOOGLE, Marker, Circle, Callout } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { 
@@ -12,17 +24,27 @@ import {
   getDoc, 
   GeoPoint, 
   addDoc,
-  serverTimestamp 
+  serverTimestamp,
+  deleteDoc,
+  onSnapshot 
 } from '@firebase/firestore';
 import { db } from '@/config/firebase';
 import { useAuth } from '@/contexts/AuthContext';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import EnhancedUserMapMarker, { MarkerTier } from '@/components/maps/EnhancedUserMapMarker';
+import EnhancedUserMapMarker from '@/components/maps/EnhancedUserMapMarker';
 import ProfileCard from '@/components/maps/ProfileCard';
+import FilterDrawer from '@/components/maps/FilterDrawer';
 import { router } from 'expo-router';
+import { 
+  getDistanceFromLatLonInMeters, 
+  offsetOverlappingMarkers, 
+  radiusToLatitudeDelta 
+} from '@/utils/geospatial';
+import { useUserPresence } from '@/utils/presence';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Constants for location
-const QUARTER_MILE_IN_METERS = 400; // 0.4 km
+const QUARTER_MILE_IN_METERS = 400; // 0.4 km (quarter mile)
 const LOCATION_TASK_NAME = 'background-location-task';
 
 // Constants for tier system
@@ -34,19 +56,54 @@ const TIER_THRESHOLDS = {
   CASUAL: 1, // 1-2 shared interests
 };
 
+// Get screen dimensions
+const { width, height } = Dimensions.get('window');
+
+// Tabbed navigation menu height calculation
+const TAB_BAR_HEIGHT = Platform.OS === 'ios' ? 83 : 70; // Height including safe area insets on iOS
+
 export default function MapScreen() {
   const { user, userData } = useAuth();
   const [location, setLocation] = useState(null);
   const [nearbyUsers, setNearbyUsers] = useState([]);
+  const [filteredUsers, setFilteredUsers] = useState([]);
   const [errorMsg, setErrorMsg] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
   const [showProfileCard, setShowProfileCard] = useState(false);
+  
+  // Filter drawer state
+  const [showFilterDrawer, setShowFilterDrawer] = useState(false);
+  const [filters, setFilters] = useState({
+    selectedInterests: [],
+    minSharedInterests: 1,
+    onlineOnly: false
+  });
+  const [filtersActive, setFiltersActive] = useState(false);
+  
+  // Location visibility state
+  const [locationVisible, setLocationVisible] = useState(userData?.location?.visible || false);
+  const [availableInterests, setAvailableInterests] = useState([]);
+  
+  // Animation refs
+  const filterDrawerAnimation = useRef(new Animated.Value(0)).current;
+  const controlsOpacity = useRef(new Animated.Value(1)).current;
+  const controlsPosition = useRef(new Animated.Value(0)).current;
+  
+  // Map refs
   const mapRef = useRef(null);
-
+  
+  // Setup user presence
+  useUserPresence();
+  
   console.log('MapScreen rendering, user:', user ? 'Authenticated' : 'Not authenticated');
   console.log('Platform:', Platform.OS);
+
+  // Setup initial load effect
+  useEffect(() => {
+    loadAvailableInterests();
+  }, []);
 
   // Initial location setup
   useEffect(() => {
@@ -71,6 +128,11 @@ export default function MapScreen() {
         console.log('Location obtained:', location ? 'Yes' : 'No');
         setLocation(location);
         
+        // Restore visibility setting from user data
+        if (userData?.location?.visible !== undefined) {
+          setLocationVisible(userData.location.visible);
+        }
+        
         // Save user location to Firebase
         if (user?.uid) {
           console.log('Saving location to Firebase');
@@ -82,6 +144,7 @@ export default function MapScreen() {
               location.coords.longitude
             ),
             timestamp: new Date(),
+            lastSeen: serverTimestamp(),
             visible: userData?.location?.visible || false
           }, { merge: true });
           
@@ -102,6 +165,164 @@ export default function MapScreen() {
 
     setupLocation();
   }, [user?.uid, userData?.location?.visible]);
+  
+  // Listen for real-time updates of online users
+  useEffect(() => {
+    if (!user?.uid || !location) return;
+    
+    console.log('Setting up presence listener');
+    
+    const presenceRef = collection(db, 'presence');
+    const unsubscribe = onSnapshot(
+      presenceRef,
+      (snapshot) => {
+        // Get current online users
+        const onlineUsers = new Set();
+        snapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.online === true) {
+            onlineUsers.add(doc.id);
+          }
+        });
+        
+        console.log(`Found ${onlineUsers.size} online users`);
+        
+        // Update our nearby users with online status
+        setNearbyUsers(prevUsers => {
+          const updatedUsers = prevUsers.map(user => ({
+            ...user,
+            online: onlineUsers.has(user.uid)
+          }));
+          
+          // Apply filters to get filtered user list
+          applyFilters(updatedUsers);
+          
+          return updatedUsers;
+        });
+      },
+      (error) => {
+        console.error('Error getting presence:', error);
+      }
+    );
+    
+    return () => unsubscribe();
+  }, [location, user?.uid, filters]);
+  
+  // Monitor filter changes and apply them
+  useEffect(() => {
+    applyFilters(nearbyUsers);
+    
+    // Check if any filters are active
+    const isActive = 
+      filters.selectedInterests.length > 0 || 
+      filters.minSharedInterests > 1 ||
+      filters.onlineOnly;
+    
+    setFiltersActive(isActive);
+  }, [filters, nearbyUsers]);
+  
+  // Animate controls when profile card visibility changes
+  useEffect(() => {
+    if (showProfileCard) {
+      // Hide controls when profile card appears
+      Animated.parallel([
+        Animated.timing(controlsOpacity, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(controlsPosition, {
+          toValue: 50, // Move controls down/away
+          duration: 250,
+          useNativeDriver: true,
+        })
+      ]).start();
+    } else {
+      // Show controls when profile card disappears
+      Animated.parallel([
+        Animated.timing(controlsOpacity, {
+          toValue: 1,
+          duration: 250,
+          useNativeDriver: true,
+        }),
+        Animated.timing(controlsPosition, {
+          toValue: 0, // Return to original position
+          duration: 200,
+          useNativeDriver: true,
+        })
+      ]).start();
+    }
+  }, [showProfileCard]);
+  
+  // Load all available interests for filtering
+  const loadAvailableInterests = async () => {
+    try {
+      // In a real app, this would be a Cloud Function or a dedicated interests collection
+      // For now, we'll extract interests from all user profiles
+      const usersRef = collection(db, 'users');
+      const snapshot = await getDocs(usersRef);
+      
+      const allInterests = new Set();
+      
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        if (data.interests && Array.isArray(data.interests)) {
+          data.interests.forEach(interest => {
+            allInterests.add(interest);
+          });
+        }
+      });
+      
+      console.log(`Loaded ${allInterests.size} unique interests`);
+      setAvailableInterests(Array.from(allInterests).sort());
+    } catch (error) {
+      console.error('Error loading interests:', error);
+    }
+  };
+  
+  // Apply filters to users
+  const applyFilters = useCallback((users) => {
+    if (!users || users.length === 0) {
+      setFilteredUsers([]);
+      return;
+    }
+    
+    console.log('Applying filters:', {
+      interestsCount: filters.selectedInterests.length,
+      minShared: filters.minSharedInterests,
+      onlineOnly: filters.onlineOnly
+    });
+    
+    let filtered = [...users];
+    
+    // Filter by minimum shared interests
+    if (filters.minSharedInterests > 1) {
+      filtered = filtered.filter(user => user.sharedInterestsCount >= filters.minSharedInterests);
+    }
+    
+    // Filter by specific interests
+    if (filters.selectedInterests.length > 0) {
+      filtered = filtered.filter(user => {
+        if (!user.interests || !Array.isArray(user.interests)) return false;
+        
+        // Check if user has at least one of the selected interests
+        return filters.selectedInterests.some(interest => 
+          user.interests.includes(interest)
+        );
+      });
+    }
+    
+    // Filter by online status
+    if (filters.onlineOnly) {
+      filtered = filtered.filter(user => user.online === true);
+    }
+    
+    // Apply the offset algorithm to prevent overlapping markers
+    const offsetUsers = offsetOverlappingMarkers(filtered);
+    
+    console.log(`Filtered from ${users.length} to ${filtered.length} users`);
+    setFilteredUsers(offsetUsers);
+  }, [filters]);
   
   // Calculate tier based on number of shared interests
   const calculateTier = (sharedInterestsCount) => {
@@ -156,6 +377,7 @@ export default function MapScreen() {
       interestsCount: user.interests?.length || 0,
       hasSharedInterests: !!user.sharedInterests && Array.isArray(user.sharedInterests),
       sharedInterestsCount: user.sharedInterests?.length || 0,
+      online: user.online
     });
     
     setSelectedUser(user);
@@ -412,6 +634,20 @@ export default function MapScreen() {
       
       console.log('Current user interests:', currentUserInterests);
       
+      // Get presence data to determine who's online
+      const presenceRef = collection(db, 'presence');
+      const presenceSnapshot = await getDocs(presenceRef);
+      const onlineUsers = new Set();
+      
+      presenceSnapshot.forEach(doc => {
+        const data = doc.data();
+        if (data.online === true) {
+          onlineUsers.add(doc.id);
+        }
+      });
+      
+      console.log(`Found ${onlineUsers.size} online users`);
+      
       // In a production app, you would use Firebase Geoqueries or a cloud function
       // For simplicity, we'll fetch all visible locations and filter client-side
       const locationsRef = collection(db, 'locations');
@@ -451,6 +687,7 @@ export default function MapScreen() {
               sharedInterests: [],
               sharedInterestsCount: 0,
               tier: 'casual', // Default tier
+              online: onlineUsers.has(data.uid) // Check if user is online
             };
             
             users.push(userObj);
@@ -578,24 +815,14 @@ export default function MapScreen() {
         sharedInterests: u.sharedInterestsCount
       })));
       
-      // Pre-cache images for faster loading
-      users.forEach(user => {
-        if (user.photoURL) {
-          // Preload images by creating a new Image object
-          const prefetchImage = async () => {
-            try {
-              console.log(`Pre-caching image for user ${user.name}`);
-              const imageAsset = Image.prefetch(user.photoURL);
-            } catch (error) {
-              console.error(`Failed to pre-cache image for ${user.name}:`, error);
-            }
-          };
-          prefetchImage();
-        }
-      });
+      // Apply offset algorithm to prevent overlapping markers
+      const offsetUsers = offsetOverlappingMarkers(users);
       
-      // Now update the users state
-      setNearbyUsers(users);
+      // Update the state
+      setNearbyUsers(offsetUsers);
+      
+      // Apply current filters
+      applyFilters(offsetUsers);
     } catch (error) {
       console.error('Error fetching nearby users:', error);
       Alert.alert('Error', 'Failed to fetch nearby users.');
@@ -604,24 +831,105 @@ export default function MapScreen() {
     }
   };
   
-  // Helper function to calculate distance
-  const getDistanceFromLatLonInMeters = (lat1, lon1, lat2, lon2) => {
-    const R = 6371; // Radius of the earth in km
-    const dLat = deg2rad(lat2 - lat1);
-    const dLon = deg2rad(lon2 - lon1);
-    const a = 
-      Math.sin(dLat/2) * Math.sin(dLat/2) +
-      Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * 
-      Math.sin(dLon/2) * Math.sin(dLon/2); 
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
-    const d = R * c * 1000; // Distance in meters
-    return d;
+  // Toggle location visibility
+  const toggleLocationVisibility = async () => {
+    try {
+      if (!user?.uid) return;
+      
+      const newVisibility = !locationVisible;
+      console.log(`Toggling location visibility to: ${newVisibility}`);
+      
+      // Update local state
+      setLocationVisible(newVisibility);
+      
+      // Update in Firestore - user profile
+      const userDocRef = doc(db, 'users', user.uid);
+      await setDoc(userDocRef, {
+        location: {
+          visible: newVisibility
+        }
+      }, { merge: true });
+      
+      // Update in Firestore - locations collection
+      const locationDocRef = doc(db, 'locations', user.uid);
+      await setDoc(locationDocRef, {
+        visible: newVisibility
+      }, { merge: true });
+      
+      console.log('Location visibility updated in Firebase');
+    } catch (error) {
+      console.error('Error toggling location visibility:', error);
+      // Revert local state on error
+      setLocationVisible(!locationVisible);
+      Alert.alert('Error', 'Failed to update location visibility.');
+    }
   };
   
-  const deg2rad = (deg) => {
-    return deg * (Math.PI/180);
+  // Open/close filter drawer
+  const toggleFilterDrawer = () => {
+    // Store current state for animation
+    const isVisible = !showFilterDrawer;
+    
+    // Update state immediately
+    setShowFilterDrawer(isVisible);
+    
+    // Animate drawer
+    Animated.timing(filterDrawerAnimation, {
+      toValue: isVisible ? 0 : -width,
+      duration: 300,
+      useNativeDriver: true,
+    }).start();
+  };
+  // Handle filter changes
+  const handleInterestToggle = (interest) => {
+    setFilters(prev => {
+      const updatedInterests = [...prev.selectedInterests];
+      const index = updatedInterests.indexOf(interest);
+      
+      if (index === -1) {
+        // Add the interest
+        updatedInterests.push(interest);
+      } else {
+        // Remove the interest
+        updatedInterests.splice(index, 1);
+      }
+      
+      return {
+        ...prev,
+        selectedInterests: updatedInterests
+      };
+    });
   };
   
+  // Handle minimum shared interests change
+  const handleMinSharedInterestsChange = (value) => {
+    setFilters(prev => ({
+      ...prev,
+      minSharedInterests: value
+    }));
+  };
+  
+  // Handle online only toggle
+  const handleOnlineOnlyToggle = (value) => {
+    setFilters(prev => ({
+      ...prev,
+      onlineOnly: value
+    }));
+  };
+  
+  // Function to get safe area insets
+  const getSafeAreaInsets = () => {
+    // On iOS, the status bar height is typically around 44pt
+    // On Android, it varies, but we can use a default value
+    const statusBarHeight = Platform.OS === 'ios' ? 44 : 24;
+    
+    // Use the TAB_BAR_HEIGHT constant for the bottom inset
+    return {
+      top: statusBarHeight,
+      bottom: TAB_BAR_HEIGHT
+    };
+  };
+
   // Refresh location and nearby users
   const handleRefresh = async () => {
     if (loading || refreshing) return;
@@ -645,7 +953,8 @@ export default function MapScreen() {
             location.coords.longitude
           ),
           timestamp: new Date(),
-          visible: userData?.location?.visible || false
+          visible: locationVisible,
+          lastSeen: serverTimestamp()
         }, { merge: true });
         
         // Fetch nearby users
@@ -712,8 +1021,8 @@ export default function MapScreen() {
               strokeWidth={1}
             />
             
-            {/* Nearby users markers - Using direct approach for iOS */}
-            {nearbyUsers.map((nearbyUser, index) => {
+            {/* Nearby users markers - Using filtered users */}
+            {filteredUsers.map((nearbyUser, index) => {
               if (nearbyUser.photoURL) {
                 console.log(`Rendering marker for user ${nearbyUser.uid} - profile image available`);
               }
@@ -737,40 +1046,116 @@ export default function MapScreen() {
                     name={nearbyUser.name}
                     tier={nearbyUser.tier}
                     sharedInterestsCount={nearbyUser.sharedInterestsCount}
+                    online={nearbyUser.online}
                   />
                 </Marker>
               );
             })}
           </MapView>
           
-          {/* Refresh button */}
-          <TouchableOpacity 
-            style={styles.refreshButton}
-            onPress={handleRefresh}
-            disabled={refreshing}
-          >
-            {refreshing ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
-              <FontAwesome name="refresh" size={20} color="#fff" />
-            )}
-          </TouchableOpacity>
+          {/* Filter Drawer */}
+          <FilterDrawer
+            visible={showFilterDrawer}
+            onClose={toggleFilterDrawer}
+            filters={filters}
+            allInterests={availableInterests}
+            onInterestToggle={handleInterestToggle}
+            onMinSharedInterestsChange={handleMinSharedInterestsChange}
+            onOnlineOnlyToggle={handleOnlineOnlyToggle}
+            drawerAnimation={filterDrawerAnimation}
+          />
           
-          {/* Information panel */}
-          <View style={styles.infoPanel}>
+          {/* Top control buttons - position changes when profile card is visible */}
+          <Animated.View 
+            style={[
+              styles.topButtonsContainer, 
+              { 
+                top: getSafeAreaInsets().top + 10,
+                right: 16,
+                opacity: controlsOpacity,
+                transform: [
+                  { translateY: controlsPosition },
+                  { scale: Animated.subtract(1, Animated.multiply(0.2, Animated.divide(controlsPosition, 50))) }
+                ]
+              }
+            ]}
+          >
+            {/* Refresh button */}
+            <TouchableOpacity 
+              style={styles.topButton}
+              onPress={handleRefresh}
+              disabled={refreshing}
+            >
+              {refreshing ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <FontAwesome name="refresh" size={20} color="#fff" />
+              )}
+            </TouchableOpacity>
+            
+            {/* Filter button */}
+            <TouchableOpacity 
+              style={[
+                styles.topButton, 
+                filtersActive && styles.topButtonActive
+              ]}
+              onPress={toggleFilterDrawer}
+            >
+              <FontAwesome name="filter" size={20} color="#fff" />
+            </TouchableOpacity>
+            
+            {/* Visibility toggle switch */}
+            <View style={styles.switchContainer}>
+              <Switch
+                value={locationVisible}
+                onValueChange={toggleLocationVisibility}
+                trackColor={{ false: "#F44336", true: "#4CAF50" }}
+                thumbColor="#ffffff"
+                ios_backgroundColor="#F44336"
+              />
+            </View>
+          </Animated.View>
+          
+          {/* Information panel - hide when profile card is visible */}
+          <Animated.View 
+            style={[
+              styles.infoPanel, 
+              { 
+                bottom: TAB_BAR_HEIGHT + 16,
+                opacity: controlsOpacity,
+                transform: [
+                  { translateY: controlsPosition }
+                ]
+              }
+            ]}
+          >
             <Text style={styles.infoTitle}>Nearby Users</Text>
             <Text style={styles.infoText}>
-              {nearbyUsers.length > 0 
-                ? `${nearbyUsers.length} users nearby`
-                : 'No users nearby at the moment'}
+              {filteredUsers.length > 0 
+                ? `${filteredUsers.length} users nearby`
+                : filtersActive
+                  ? 'No users match your current filters'
+                  : 'No users nearby at the moment'}
             </Text>
             
-            {!userData?.location?.visible && (
+            {!locationVisible && (
               <Text style={styles.warningText}>
                 Your location is currently hidden. Others can't see you on the map.
               </Text>
             )}
-          </View>
+            
+            {filtersActive && (
+              <Text style={styles.filterText}>
+                Filters active: {
+                  [
+                    filters.minSharedInterests > 1 ? `Min ${filters.minSharedInterests} shared interests` : '',
+                    filters.selectedInterests.length > 0 ? `${filters.selectedInterests.length} interests selected` : '',
+                    filters.onlineOnly ? 'Online only' : ''
+                  ].filter(Boolean).join(', ')
+                }
+              </Text>
+            )}
+          </Animated.View>
           
           {/* Profile card modal */}
           {showProfileCard && selectedUser && (
@@ -784,6 +1169,7 @@ export default function MapScreen() {
               sharedInterests={selectedUser.sharedInterests || []}
               tier={selectedUser.tier || 'casual'}
               distance={selectedUser.distance || 0}
+              online={selectedUser.online || false}
               onDismiss={handleDismissProfileCard}
               onStartChat={handleStartChat}
               onInvite={handleSendInvite}
@@ -814,25 +1200,48 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  refreshButton: {
+  topButtonsContainer: {
     position: 'absolute',
-    top: 16,
     right: 16,
+    zIndex: 10,
+  },
+  topButton: {
     backgroundColor: '#007bff',
     width: 50,
     height: 50,
     borderRadius: 25,
     justifyContent: 'center',
     alignItems: 'center',
+    marginBottom: 10,
     elevation: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 2,
   },
+  topButtonActive: {
+    backgroundColor: '#ff6600', // Orange color for active filter
+  },
+  visibleButton: {
+    backgroundColor: '#4CAF50', // Green for visible
+  },
+  hiddenButton: {
+    backgroundColor: '#F44336', // Red for hidden
+  },
+  switchContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 20,
+    padding: 5,
+    marginTop: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 3,
+  },
+
   infoPanel: {
     position: 'absolute',
-    bottom: 16,
     left: 16,
     right: 16,
     backgroundColor: 'white',
@@ -859,18 +1268,10 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontStyle: 'italic',
   },
-  profileCardContainer: {
-    position: 'absolute',
-    bottom: 16,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 2,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+  filterText: {
+    fontSize: 14,
+    color: '#ff6600',
+    marginTop: 8,
+    fontStyle: 'italic',
   },
 });

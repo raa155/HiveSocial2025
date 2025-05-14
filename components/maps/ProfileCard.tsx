@@ -11,8 +11,6 @@ import {
   PanResponder,
   Dimensions,
   Modal,
-  StatusBar,
-  SafeAreaView,
   Platform
 } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
@@ -31,6 +29,7 @@ interface ProfileCardProps {
   sharedInterests: string[];
   tier: MarkerTier;
   distance?: number;
+  online?: boolean;
   onDismiss: () => void;
   onStartChat?: (uid: string) => void;
   onInvite?: (uid: string) => void;
@@ -39,8 +38,14 @@ interface ProfileCardProps {
 }
 
 const { height, width } = Dimensions.get('window');
-const TAB_BAR_HEIGHT = 80; // Increased to account for potential safe area
-const DISMISS_THRESHOLD = 100; // How far the user needs to drag down to dismiss
+const DISMISS_THRESHOLD = 100; // How far the user needs to drag to dismiss
+
+// Get the safe area insets
+const SAFE_AREA_TOP = Platform.OS === 'ios' ? 44 : 0;
+// Tab bar height estimation for bottom spacing
+const TAB_BAR_HEIGHT = Platform.OS === 'ios' ? 83 : 70; // Height including safe area insets on iOS
+// Header height estimation (status bar + app header)
+const HEADER_HEIGHT = Platform.OS === 'ios' ? 90 : 60;
 
 // Connection Status Types
 type ConnectionStatus = 'none' | 'pending_sent' | 'pending_received' | 'connected';
@@ -55,6 +60,7 @@ const ProfileCard: React.FC<ProfileCardProps> = ({
   sharedInterests = [],
   tier = 'casual',
   distance,
+  online = false,
   onDismiss,
   onStartChat,
   onInvite,
@@ -80,6 +86,30 @@ const ProfileCard: React.FC<ProfileCardProps> = ({
   const [connectionId, setConnectionId] = useState<string | null>(null);
   const [chatRoomId, setChatRoomId] = useState<string | null>(null);
   const [checkingConnection, setCheckingConnection] = useState(true);
+
+  // Calculate available space between header and tab bar
+  const getAvailableSpace = () => {
+    return height - HEADER_HEIGHT - TAB_BAR_HEIGHT - 30; // 30px buffer
+  };
+
+  // Calculate appropriate max height for the card
+  const calculateMaxHeight = () => {
+    const availableSpace = getAvailableSpace();
+    // Use at most 85% of available space
+    return availableSpace * 0.85;
+  };
+
+  // Ensure the button container is visible above the tab bar
+  const ensureButtonVisibility = () => {
+    const availableSpace = getAvailableSpace();
+    
+    return {
+      // Ensure the card height is at least tall enough to show buttons plus some content
+      minHeight: Math.min(200, availableSpace * 0.3),
+      // Ensure maximum height fits between header and tab bar
+      maxHeight: availableSpace * 0.85
+    };
+  };
 
   // Check connection status on component mount
   useEffect(() => {
@@ -156,59 +186,64 @@ const ProfileCard: React.FC<ProfileCardProps> = ({
     checkConnectionStatus();
   }, [user?.uid, uid]);
 
-  // Debug log
-  useEffect(() => {
-    console.log('ProfileCard mounted with props:', { 
-      name, 
-      hasPhoto: !!photoURL, 
-      profileImages: safeProfileImages.length,
-      interestsCount: safeInterests.length,
-      sharedInterestsCount: safeSharedInterests.length,
-      tier,
-      distance,
-      connectionStatus
-    });
-    
-    console.log('Bio content:', bio);
-    console.log('Profile images URLs:', safeProfileImages.slice(0, 1));
-    console.log('Shared interests:', safeSharedInterests);
-  }, [connectionStatus]);
-
-  // Animation setup
-  const slideAnim = useRef(new Animated.Value(height)).current;
+  // Animation setup - starting from below and sliding up
+  const slideAnim = useRef(new Animated.Value(getAvailableSpace())).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
 
-  // Pan responder for swipe to dismiss from the drag handle
+  // Pan responder for swipe to dismiss from the drag handle only
   const panResponder = useRef(
     PanResponder.create({
+      // Only respond to touch events that start in the drag handle
       onStartShouldSetPanResponder: () => true,
+      
+      // Only respond to movements if they're primarily downward
       onMoveShouldSetPanResponder: (_, gestureState) => {
-        return gestureState.dy > 5;
+        // Detect primarily downward swipe (more vertical than horizontal)
+        return gestureState.dy > 5 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
       },
+      
+      // Handle the drag movement
       onPanResponderMove: (_, gestureState) => {
         if (gestureState.dy > 0) {
+          // Only allow downward movement (positive dy)
           slideAnim.setValue(gestureState.dy);
         }
       },
+      
+      // Handle the release of the drag
       onPanResponderRelease: (_, gestureState) => {
         if (gestureState.dy > DISMISS_THRESHOLD) {
+          // If dragged down far enough, dismiss the card
           dismiss();
         } else {
+          // Otherwise, spring back to the original position
           Animated.spring(slideAnim, {
             toValue: 0,
             useNativeDriver: true,
+            tension: 40,
+            friction: 7
           }).start();
         }
       },
+      
+      // Terminate responder when needed
+      onPanResponderTerminate: () => {
+        // Spring back to original position if terminated
+        Animated.spring(slideAnim, {
+          toValue: 0,
+          useNativeDriver: true,
+        }).start();
+      }
     })
   ).current;
 
-  // Animate card entry
+  // Animate card entry from bottom
   useEffect(() => {
     Animated.parallel([
-      Animated.timing(slideAnim, {
+      Animated.spring(slideAnim, {
         toValue: 0,
-        duration: 300,
+        speed: 12,
+        bounciness: 6,
         useNativeDriver: true,
       }),
       Animated.timing(opacityAnim, {
@@ -219,11 +254,11 @@ const ProfileCard: React.FC<ProfileCardProps> = ({
     ]).start();
   }, []);
 
-  // Dismiss animation
+  // Dismiss animation - slide down
   const dismiss = () => {
     Animated.parallel([
       Animated.timing(slideAnim, {
-        toValue: height,
+        toValue: getAvailableSpace(),
         duration: 300,
         useNativeDriver: true,
       }),
@@ -391,18 +426,45 @@ const ProfileCard: React.FC<ProfileCardProps> = ({
         <Animated.View 
           style={[
             styles.container, 
-            { transform: [{ translateY: slideAnim }] }
+            { 
+              transform: [{ translateY: slideAnim }],
+              // Position from bottom with more space above the tab bar
+              bottom: TAB_BAR_HEIGHT + 20,
+              // Ensure top margin accounts for header
+              top: HEADER_HEIGHT + 10,
+              // Use a calculated height to ensure card fits between header and tab bar
+              height: undefined,
+              maxHeight: height - HEADER_HEIGHT - TAB_BAR_HEIGHT - 40
+            }
           ]}
         >
-          {/* Drag Handle - only this has the pan responder */}
+          {/* This TouchableOpacity blocks touch events from propagating to the overlay */}
+          <TouchableOpacity activeOpacity={1} style={{flex: 1}} onPress={() => {}}>
+            {/* Close button */}
+            <TouchableOpacity 
+              style={styles.closeButton}
+              onPress={dismiss}
+            >
+              <FontAwesome name="times" size={22} color="#888" />
+            </TouchableOpacity>
+
+          {/* Drag Handle - Only area where pan gesture works */}
           <View {...panResponder.panHandlers} style={styles.dragHandle}>
             <View style={styles.dragIndicator} />
           </View>
 
-          {/* Main Content Area */}
-          <View style={{ flex: 1, flexDirection: 'column' }}>
-            {/* Content in ScrollView */}
-            <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollViewContent}>
+          {/* Main Content Area - No pan gestures here */}
+          <View style={styles.contentWrapper}>
+            {/* Content in ScrollView including action buttons */}
+            <ScrollView 
+              style={styles.scrollView} 
+              contentContainerStyle={styles.scrollViewContent}
+              showsVerticalScrollIndicator={true}
+              bounces={false}
+              overScrollMode="never"
+              contentInset={{ bottom: 20 }}
+              automaticallyAdjustContentInsets={false}
+            >
               {/* Profile Header */}
               <View style={styles.header}>
                 <View style={[styles.photoContainer, { borderColor: tierInfo.color }]}>
@@ -421,8 +483,16 @@ const ProfileCard: React.FC<ProfileCardProps> = ({
                 
                 <View style={styles.userInfo}>
                   <Text style={styles.nameText}>{name}</Text>
-                  <View style={[styles.tierBadge, { backgroundColor: tierInfo.color }]}>
-                    <Text style={styles.tierText}>{tierInfo.name}</Text>
+                  <View style={styles.badgeContainer}>
+                    <View style={[styles.tierBadge, { backgroundColor: tierInfo.color }]}>
+                      <Text style={styles.tierText}>{tierInfo.name}</Text>
+                    </View>
+                    
+                    {online && (
+                      <View style={styles.onlineBadge}>
+                        <Text style={styles.onlineText}>Online</Text>
+                      </View>
+                    )}
                   </View>
                   {distance !== undefined && (
                     <Text style={styles.distanceText}>{distance}m away</Text>
@@ -494,13 +564,16 @@ const ProfileCard: React.FC<ProfileCardProps> = ({
                 </View>
               )}
 
-              {/* Bottom Spacing */}
-              <View style={{ height: 20 }} />
+              {/* Action Buttons included as part of scrollable content */}
+              <View style={styles.buttonSection}>
+                {renderActionButtons()}
+              </View>
+              
+              {/* Bottom Spacing - limited to avoid excessive padding */}
+              <View style={{ height: 15 }} />
             </ScrollView>
-
-            {/* Action Buttons - Fixed at bottom */}
-            {renderActionButtons()}
           </View>
+          </TouchableOpacity>
         </Animated.View>
       </TouchableOpacity>
 
@@ -513,7 +586,7 @@ const ProfileCard: React.FC<ProfileCardProps> = ({
       >
         <View style={styles.modalContainer}>
           <TouchableOpacity 
-            style={styles.closeButton}
+            style={styles.modalCloseButton}
             onPress={closeImageModal}
           >
             <FontAwesome name="close" size={24} color="#fff" />
@@ -540,24 +613,53 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
+    justifyContent: 'flex-start',
   },
   dismissOverlay: {
     flex: 1,
-    justifyContent: 'flex-end',
   },
   container: {
+    position: 'absolute',
+    left: 10,
+    right: 10,
     backgroundColor: 'white',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    height: height * 0.75, // 75% of screen height
-    maxHeight: height - TAB_BAR_HEIGHT,
+    borderRadius: 20,
+    minHeight: 200, // Ensure minimum height
     flexDirection: 'column',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 10,
+    overflow: 'hidden', // Ensure content doesn't overflow
   },
-  dragHandle: {
-    height: 35,
+  contentWrapper: {
+    flex: 1,
+    flexDirection: 'column',
+    overflow: 'hidden',
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+  },
+  closeButton: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#f0f0f0',
     justifyContent: 'center',
     alignItems: 'center',
+    zIndex: 10,
+  },
+  dragHandle: {
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 5,
+    backgroundColor: 'white', // Ensures visible background when dragging
   },
   dragIndicator: {
     width: 40,
@@ -567,9 +669,20 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+    overflow: 'hidden', // Ensure content doesn't overflow
   },
   scrollViewContent: {
     padding: 20,
+    paddingTop: 10,
+    paddingBottom: 30, // Adequate bottom padding
+  },
+  buttonSection: {
+    marginTop: 30,
+    paddingTop: 15,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
   },
   header: {
     flexDirection: 'row',
@@ -603,14 +716,32 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: 5,
   },
+  badgeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    marginBottom: 5,
+  },
   tierBadge: {
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
     alignSelf: 'flex-start',
-    marginBottom: 5,
+    marginRight: 8,
+  },
+  onlineBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: '#4CAF50',
+    alignSelf: 'flex-start',
   },
   tierText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 12,
+  },
+  onlineText: {
     color: 'white',
     fontWeight: 'bold',
     fontSize: 12,
@@ -679,9 +810,8 @@ const styles = StyleSheet.create({
   buttonContainer: {
     flexDirection: 'row',
     padding: 15,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
     backgroundColor: 'white',
+    borderRadius: 12,
   },
   button: {
     flex: 1,
@@ -707,7 +837,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  closeButton: {
+  modalCloseButton: {
     position: 'absolute',
     top: 40,
     right: 20,
@@ -724,7 +854,5 @@ const styles = StyleSheet.create({
     height: '70%',
   },
 });
-
-export default ProfileCard;
 
 export default ProfileCard;

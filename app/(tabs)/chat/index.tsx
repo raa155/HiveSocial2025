@@ -28,8 +28,12 @@ import {
   getDoc 
 } from '@firebase/firestore';
 import { db } from '@/config/firebase';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+// Tabbed navigation menu height calculation
+const TAB_BAR_HEIGHT = Platform.OS === 'ios' ? 83 : 70; // Height including safe area insets on iOS
 
 export default function ChatScreen() {
   const { user, userData } = useAuth();
@@ -409,7 +413,7 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     paddingHorizontal: 16,
-    paddingBottom: 20,
+    paddingBottom: TAB_BAR_HEIGHT + 20,
   },
   chatItem: {
     flexDirection: 'row',
@@ -517,6 +521,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 32,
+    paddingBottom: TAB_BAR_HEIGHT,
   },
   emptyIconBackground: {
     width: 80,

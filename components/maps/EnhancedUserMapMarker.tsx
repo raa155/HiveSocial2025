@@ -13,6 +13,7 @@ interface EnhancedUserMapMarkerProps {
   name?: string;
   tier?: MarkerTier;
   sharedInterestsCount?: number;
+  online?: boolean;
   style?: ViewStyle;
 }
 
@@ -25,6 +26,7 @@ const EnhancedUserMapMarker: React.FC<EnhancedUserMapMarkerProps> = ({
   name, 
   tier = 'casual',
   sharedInterestsCount = 0,
+  online = false,
   style 
 }) => {
   const [imageLoaded, setImageLoaded] = useState(false);
@@ -232,6 +234,11 @@ const EnhancedUserMapMarker: React.FC<EnhancedUserMapMarkerProps> = ({
         </View>
       )}
       
+      {/* Online status indicator */}
+      {online && (
+        <View style={styles.onlineIndicator} />
+      )}
+      
       {/* Display distance if available */}
       {distance && (
         <View style={[styles.distanceContainer, { backgroundColor: `${markerColor}CC` }]}>
@@ -287,6 +294,17 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 10,
     fontWeight: 'bold',
+  },
+  onlineIndicator: {
+    position: 'absolute',
+    bottom: -5,
+    right: 5,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#4CAF50', // Green for online
+    borderWidth: 1,
+    borderColor: '#fff',
   },
   loadingIndicator: {
     position: 'absolute',

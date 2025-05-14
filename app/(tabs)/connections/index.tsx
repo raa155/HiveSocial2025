@@ -32,9 +32,13 @@ import {
   serverTimestamp
 } from '@firebase/firestore';
 import { db } from '@/config/firebase';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_PADDING = 16;
+
+// Tabbed navigation menu height calculation
+const TAB_BAR_HEIGHT = Platform.OS === 'ios' ? 83 : 70; // Height including safe area insets on iOS
 
 // Tier color mapping to match the map screen colors
 const TIER_COLORS = {
@@ -745,7 +749,7 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     paddingHorizontal: 16,
-    paddingBottom: 24,
+    paddingBottom: TAB_BAR_HEIGHT + 24,
   },
   connectionCard: {
     backgroundColor: '#fff',
@@ -940,7 +944,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 32,
-    paddingBottom: 40,
+    paddingBottom: TAB_BAR_HEIGHT + 40,
   },
   emptyIconContainer: {
     width: 80,
