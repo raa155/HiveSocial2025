@@ -1,11 +1,33 @@
-import React, { useState } from 'react';
-import { StyleSheet, View, Text, Image, ScrollView, TouchableOpacity, Switch, Alert, ActivityIndicator, Modal, Dimensions } from 'react-native';
+import React, { useState, useRef } from 'react';
+import { 
+  StyleSheet, 
+  View, 
+  Text, 
+  Image, 
+  ScrollView, 
+  TouchableOpacity, 
+  Switch, 
+  Alert, 
+  ActivityIndicator, 
+  Modal, 
+  Dimensions,
+  Animated,
+  Platform,
+} from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAuth } from '@/contexts/AuthContext';
 import { signOut } from '@firebase/auth';
 import { doc, updateDoc } from '@firebase/firestore';
 import { auth, db } from '@/config/firebase';
 import { router } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { BlurView } from 'expo-blur';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const CARD_PADDING = 20;
 
 export default function ProfileScreen() {
   const { userData, user, refreshUserData } = useAuth();
@@ -13,6 +35,14 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(false);
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
+  
+  // Animation values
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const headerOpacity = scrollY.interpolate({
+    inputRange: [0, 100],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
   
   // Handle image tap
   const handleImageTap = (index: number) => {
@@ -29,10 +59,8 @@ export default function ProfileScreen() {
   // Handle logout
   const handleLogout = async () => {
     try {
-      // Use the signOut function from AuthContext instead of directly calling Firebase
       await auth.signOut();
       console.log('User signed out via profile screen');
-      // Navigation will be handled by the AuthContext listener
     } catch (error) {
       console.error('Error signing out:', error);
       Alert.alert('Error', 'Failed to sign out. Please try again.');
@@ -63,101 +91,160 @@ export default function ProfileScreen() {
   if (!userData) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007bff" />
+        <ActivityIndicator size="large" color="#6C5CE7" />
       </View>
     );
   }
   
   return (
-    <ScrollView style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.profileImageContainer}>
-          {userData.photoURL ? (
-            <Image source={{ uri: userData.photoURL }} style={styles.profileImage} />
+    <View style={styles.container}>
+      <StatusBar style="dark" />
+      
+      {/* Animated Header */}
+      <Animated.View style={[styles.animatedHeader, { opacity: headerOpacity }]}>
+        <Text style={styles.animatedHeaderText}>{userData.name || 'Profile'}</Text>
+      </Animated.View>
+      
+      <Animated.ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+          { useNativeDriver: true }
+        )}
+        scrollEventThrottle={16}
+      >
+        {/* Profile Header */}
+        <View style={styles.profileHeader}>
+          <LinearGradient
+            colors={['#6C5CE7', '#a29bfe']}
+            style={styles.headerGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          />
+          <View style={styles.profileImageContainer}>
+            {userData.photoURL ? (
+              <Image source={{ uri: userData.photoURL }} style={styles.profileImage} />
+            ) : (
+              <View style={styles.placeholderImage}>
+                <FontAwesome name="user" size={60} color="#fff" />
+              </View>
+            )}
+          </View>
+          <Text style={styles.profileName}>{userData.name || 'Anonymous User'}</Text>
+        </View>
+        
+        {/* About Me Card */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <MaterialIcons name="person" size={20} color="#6C5CE7" />
+            <Text style={styles.cardTitle}>About Me</Text>
+          </View>
+          <Text style={styles.bioText}>
+            {userData.bio || 'No bio yet. Tap Edit Profile to add a bio.'}
+          </Text>
+        </View>
+        
+        {/* Interests Card */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <MaterialIcons name="favorite" size={20} color="#6C5CE7" />
+            <Text style={styles.cardTitle}>Interests</Text>
+          </View>
+          
+          {userData.interests && userData.interests.length > 0 ? (
+            <View style={styles.interestsContainer}>
+              {userData.interests.map((interest, index) => (
+                <View key={index} style={styles.interestTag}>
+                  <Text style={styles.interestText}>{interest}</Text>
+                </View>
+              ))}
+            </View>
           ) : (
-            <FontAwesome name="user-circle" size={100} color="#ccc" />
+            <Text style={styles.emptyText}>No interests added yet. Tap Edit Profile to add interests.</Text>
           )}
         </View>
-        <Text style={styles.name}>{userData.name || 'Anonymous User'}</Text>
-      </View>
-      
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>About Me</Text>
-        <Text style={styles.bio}>
-          {userData.bio || 'No bio yet. Tap Edit Profile to add a bio.'}
-        </Text>
-      </View>
-      
-      {/* Profile Images Grid */}
-      {userData.profileImages && userData.profileImages.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Photos</Text>
-          <View style={styles.profileImagesGrid}>
-            {userData.profileImages.map((imageUrl, index) => (
-              <TouchableOpacity 
-                key={index} 
-                style={styles.gridImageContainer}
-                onPress={() => handleImageTap(index)}
-                activeOpacity={0.9}
-              >
-                <Image 
-                  source={{ uri: imageUrl }} 
-                  style={styles.gridImage}
-                  resizeMode="cover"
-                />
-              </TouchableOpacity>
-            ))}
+        
+        {/* Profile Images Card */}
+        {userData.profileImages && userData.profileImages.length > 0 && (
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <MaterialIcons name="photo-library" size={20} color="#6C5CE7" />
+              <Text style={styles.cardTitle}>Photos</Text>
+            </View>
+            <View style={styles.profileImagesGrid}>
+              {userData.profileImages.map((imageUrl, index) => (
+                <TouchableOpacity 
+                  key={index} 
+                  style={styles.gridImageContainer}
+                  onPress={() => handleImageTap(index)}
+                  activeOpacity={0.9}
+                >
+                  <Image 
+                    source={{ uri: imageUrl }} 
+                    style={styles.gridImage}
+                    resizeMode="cover"
+                  />
+                  <LinearGradient
+                    colors={['transparent', 'rgba(0,0,0,0.3)']}
+                    style={styles.gridImageOverlay}
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
-        </View>
-      )}
-      
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Interests</Text>
-        {userData.interests && userData.interests.length > 0 ? (
-          <View style={styles.interestsContainer}>
-            {userData.interests.map((interest, index) => (
-              <View key={index} style={styles.interestTag}>
-                <Text style={styles.interestText}>{interest}</Text>
-              </View>
-            ))}
-          </View>
-        ) : (
-          <Text style={styles.emptyText}>No interests added yet. Tap Edit Profile to add interests.</Text>
         )}
-      </View>
-      
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Settings</Text>
-        <View style={styles.settingItem}>
-          <Text style={styles.settingLabel}>Location Visibility</Text>
-          <Switch
-            value={locationVisible}
-            onValueChange={handleLocationToggle}
-            trackColor={{ false: '#767577', true: '#81b0ff' }}
-            thumbColor={locationVisible ? '#f5dd4b' : '#f4f3f4'}
-            disabled={loading}
-          />
+        
+        {/* Settings Card */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <MaterialIcons name="settings" size={20} color="#6C5CE7" />
+            <Text style={styles.cardTitle}>Settings</Text>
+          </View>
+          <View style={styles.settingItem}>
+            <View style={styles.settingLabelContainer}>
+              <MaterialIcons name="location-on" size={20} color="#6C5CE7" />
+              <Text style={styles.settingLabel}>Location Visibility</Text>
+            </View>
+            <Switch
+              value={locationVisible}
+              onValueChange={handleLocationToggle}
+              trackColor={{ false: '#e0e0e0', true: '#a29bfe' }}
+              thumbColor={locationVisible ? '#6C5CE7' : '#f4f3f4'}
+              ios_backgroundColor="#e0e0e0"
+              disabled={loading}
+            />
+          </View>
+          <Text style={styles.settingDescription}>
+            {locationVisible 
+              ? 'Your location is visible to other users'
+              : 'Your location is hidden from other users'}
+          </Text>
         </View>
-        <Text style={styles.settingDescription}>
-          {locationVisible 
-            ? 'Your location is visible to other users'
-            : 'Your location is hidden from other users'}
-        </Text>
-      </View>
-      
-      <TouchableOpacity 
-        style={styles.editButton}
-        onPress={() => router.push('/edit-profile')}
-      >
-        <Text style={styles.editButtonText}>Edit Profile</Text>
-      </TouchableOpacity>
-      
-      <TouchableOpacity 
-        style={styles.logoutButton}
-        onPress={handleLogout}
-      >
-        <Text style={styles.logoutButtonText}>Log Out</Text>
-      </TouchableOpacity>
+        
+        {/* Action Buttons */}
+        <TouchableOpacity 
+          style={styles.editButton}
+          onPress={() => router.push('/edit-profile')}
+        >
+          <LinearGradient
+            colors={['#6C5CE7', '#a29bfe']}
+            style={styles.buttonGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+          >
+            <Text style={styles.editButtonText}>Edit Profile</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={styles.logoutButton}
+          onPress={handleLogout}
+        >
+          <Text style={styles.logoutButtonText}>Log Out</Text>
+        </TouchableOpacity>
+      </Animated.ScrollView>
       
       {/* Image Modal */}
       <Modal
@@ -167,91 +254,255 @@ export default function ProfileScreen() {
         onRequestClose={closeImageModal}
       >
         <View style={styles.modalContainer}>
-          <TouchableOpacity 
-            style={styles.modalCloseButton}
-            onPress={closeImageModal}
-          >
-            <FontAwesome name="close" size={24} color="#fff" />
-          </TouchableOpacity>
-          
-          {selectedImageIndex !== null && userData?.profileImages?.[selectedImageIndex] && (
-            <Image
-              source={{ uri: userData.profileImages[selectedImageIndex] }}
-              style={styles.fullScreenImage}
-              resizeMode="contain"
-            />
-          )}
+          <BlurView intensity={100} style={styles.modalBlur} tint="dark">
+            <TouchableOpacity 
+              style={styles.modalCloseButton}
+              onPress={closeImageModal}
+            >
+              <Ionicons name="close-circle" size={36} color="#fff" />
+            </TouchableOpacity>
+            
+            {selectedImageIndex !== null && userData?.profileImages?.[selectedImageIndex] && (
+              <Image
+                source={{ uri: userData.profileImages[selectedImageIndex] }}
+                style={styles.fullScreenImage}
+                resizeMode="contain"
+              />
+            )}
+          </BlurView>
         </View>
       </Modal>
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f8f8',
+    backgroundColor: '#f5f5f5',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#f5f5f5',
   },
-  header: {
-    alignItems: 'center',
-    padding: 20,
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 40,
+  },
+  animatedHeader: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: Platform.OS === 'ios' ? 90 : 60,
     backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    zIndex: 1000,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    paddingBottom: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 5,
+  },
+  animatedHeaderText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  profileHeader: {
+    height: 200,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    position: 'relative',
+    marginBottom: 60,
+  },
+  headerGradient: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '100%',
   },
   profileImageContainer: {
-    marginBottom: 12,
+    position: 'absolute',
+    bottom: -50,
+    borderRadius: 80,
+    borderWidth: 5,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    elevation: 5,
+    backgroundColor: '#fff',
   },
   profileImage: {
     width: 100,
     height: 100,
     borderRadius: 50,
   },
-  name: {
+  placeholderImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#a29bfe',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  profileName: {
+    color: '#fff',
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#333',
+    marginBottom: 60,
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
-  section: {
-    padding: 20,
+  card: {
     backgroundColor: '#fff',
-    marginTop: 12,
+    borderRadius: 16,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    padding: CARD_PADDING,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 3,
   },
-  sectionTitle: {
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  cardTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 12,
+    fontWeight: '600',
     color: '#333',
+    marginLeft: 8,
   },
-  bio: {
+  bioText: {
     fontSize: 16,
-    color: '#666',
+    color: '#555',
     lineHeight: 24,
+  },
+  interestsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginHorizontal: -4,
+  },
+  interestTag: {
+    backgroundColor: '#f3f0ff',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  interestText: {
+    fontSize: 14,
+    color: '#6C5CE7',
+    fontWeight: '500',
+  },
+  emptyText: {
+    fontSize: 14,
+    color: '#888',
+    fontStyle: 'italic',
   },
   profileImagesGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'flex-start',
-    marginHorizontal: -5,
+    marginHorizontal: -6,
   },
   gridImageContainer: {
-    width: '33.33%',
+    width: (SCREEN_WIDTH - 32 - CARD_PADDING * 2 - 12) / 3,
     aspectRatio: 1,
-    padding: 5,
+    padding: 6,
+    position: 'relative',
   },
   gridImage: {
     width: '100%',
     height: '100%',
-    borderRadius: 8,
+    borderRadius: 12,
+  },
+  gridImageOverlay: {
+    position: 'absolute',
+    bottom: 6,
+    left: 6,
+    right: 6,
+    height: '50%',
+    borderBottomLeftRadius: 12,
+    borderBottomRightRadius: 12,
+  },
+  settingItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  settingLabelContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  settingLabel: {
+    fontSize: 16,
+    color: '#333',
+    marginLeft: 8,
+  },
+  settingDescription: {
+    fontSize: 14,
+    color: '#888',
+    marginTop: 4,
+    marginLeft: 28,
+  },
+  editButton: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#6C5CE7',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  buttonGradient: {
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  editButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  logoutButton: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 20,
+  },
+  logoutButtonText: {
+    color: '#ff3b30',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   modalContainer: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    backgroundColor: 'transparent',
+  },
+  modalBlur: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -260,73 +511,12 @@ const styles = StyleSheet.create({
     top: 40,
     right: 20,
     zIndex: 2,
-    padding: 10,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderRadius: 20,
   },
   fullScreenImage: {
-    width: '100%',
-    height: '80%',
-  },
-  interestsContainer: {
-    display: 'flex', 
-    flexDirection: 'row',
-  },
-  interestTag: {
-    backgroundColor: '#e1f5fe',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    marginRight: 8,
-    marginBottom: 8,
-  },
-  interestText: {
-    fontSize: 14,
-    color: '#0288d1',
-  },
-  settingItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  settingLabel: {
-    fontSize: 16,
-    color: '#333',
-  },
-  settingDescription: {
-    fontSize: 14,
-    color: '#999',
-    marginTop: 4,
-  },
-  editButton: {
-    backgroundColor: '#007bff',
-    padding: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-    margin: 20,
-  },
-  editButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  logoutButton: {
-    backgroundColor: '#f8f8f8',
-    borderWidth: 1,
-    borderColor: '#ddd',
-    padding: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginHorizontal: 20,
-    marginBottom: 40,
-  },
-  logoutButtonText: {
-    color: '#ff3b30',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  emptyText: {
-    fontSize: 14,
-    color: '#999',
-    fontStyle: 'italic',
+    width: SCREEN_WIDTH - 40,
+    height: SCREEN_WIDTH - 40,
+    borderRadius: 12,
   },
 });

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   StyleSheet, 
   View, 
@@ -6,10 +6,18 @@ import {
   FlatList, 
   TouchableOpacity, 
   ActivityIndicator,
-  Alert 
+  Alert,
+  Animated,
+  Image,
+  Dimensions,
+  Platform,
+  StatusBar
 } from 'react-native';
 import { router } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
   collection, 
@@ -20,18 +28,50 @@ import {
   doc, 
   deleteDoc, 
   onSnapshot,
-  Timestamp,
   addDoc,
   serverTimestamp
 } from '@firebase/firestore';
 import { db } from '@/config/firebase';
-import { useEffect } from 'react';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const CARD_PADDING = 16;
+
+// Tier color mapping to match the map screen colors
+const TIER_COLORS = {
+  'soulmate': { primary: '#00B0FF', gradient: ['#00B0FF', '#64c8ff'] },     // Light blue
+  'bestFriend': { primary: '#FFD700', gradient: ['#FFD700', '#ffe666'] },  // Gold
+  'friend': { primary: '#C0C0C0', gradient: ['#C0C0C0', '#e6e6e6'] },      // Silver
+  'buddy': { primary: '#CD7F32', gradient: ['#CD7F32', '#e2aa73'] },       // Bronze
+  'casual': { primary: '#AAAAAA', gradient: ['#AAAAAA', '#d9d9d9'] }        // Gray
+};
 
 export default function ConnectionsScreen() {
   const { user, userData } = useAuth();
   const [loading, setLoading] = useState(true);
   const [pendingConnections, setPendingConnections] = useState([]);
   const [connections, setConnections] = useState([]);
+  const [activeTab, setActiveTab] = useState('connections'); // 'connections' or 'requests'
+  
+  // Animation values
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const headerOpacity = scrollY.interpolate({
+    inputRange: [0, 60],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
+  
+  // Tab slide animation
+  const tabIndicatorPosition = useRef(new Animated.Value(0)).current;
+  
+  // Animate tab indicator when active tab changes
+  useEffect(() => {
+    Animated.spring(tabIndicatorPosition, {
+      toValue: activeTab === 'connections' ? 0 : 1,
+      useNativeDriver: false,
+      friction: 8,
+      tension: 100
+    }).start();
+  }, [activeTab]);
 
   // Load connection requests and current connections
   useEffect(() => {
@@ -222,21 +262,42 @@ export default function ConnectionsScreen() {
   const handleDeclineConnection = async (connectionId) => {
     if (!user?.uid) return;
     
-    try {
-      setLoading(true);
-      
-      // Delete the connection request
-      await deleteDoc(doc(db, 'connectionRequests', connectionId));
-      
-      console.log('Connection request declined');
-      Alert.alert('Success', 'Connection request declined');
-      
-    } catch (error) {
-      console.error('Error declining connection:', error);
-      Alert.alert('Error', 'Failed to decline connection request');
-    } finally {
-      setLoading(false);
-    }
+    // Ask for confirmation before declining
+    Alert.alert(
+      'Decline Connection',
+      'Are you sure you want to decline this connection request?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        },
+        {
+          text: 'Decline',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setLoading(true);
+              
+              // Delete the connection request
+              await deleteDoc(doc(db, 'connectionRequests', connectionId));
+              
+              console.log('Connection request declined');
+              
+              // Alert after a slight delay to avoid UI glitches
+              setTimeout(() => {
+                Alert.alert('Success', 'Connection request declined');
+              }, 300);
+              
+            } catch (error) {
+              console.error('Error declining connection:', error);
+              Alert.alert('Error', 'Failed to decline connection request');
+            } finally {
+              setLoading(false);
+            }
+          }
+        }
+      ]
+    );
   };
 
   // Handle viewing a chat with a connection
@@ -249,42 +310,96 @@ export default function ConnectionsScreen() {
     }
   };
 
+  // Handle viewing a connection profile
+  const handleViewProfile = (user) => {
+    // Navigate to the user profile screen with the user's ID and other necessary data
+    router.push({
+      pathname: `/user-profile`,
+      params: {
+        id: user.otherUserId,
+        name: user.otherUserName,
+        tier: user.tier
+      }
+    });
+  };
+
   // Render a connection request
   const renderConnectionRequest = ({ item }) => (
-    <View style={styles.connectionItem}>
+    <View style={styles.connectionCard}>
       <View style={styles.connectionHeader}>
-        <Text style={styles.name}>{item.senderName}</Text>
-        <Text style={styles.timestamp}>
-          {new Date(item.timestamp).toLocaleDateString()}
-        </Text>
-      </View>
-
-      <View style={styles.tierContainer}>
-        <Text style={styles.tier}>
-          Tier: {getTierDisplayName(item.tier)}
-        </Text>
+        <View style={styles.userInfoContainer}>
+          {item.senderPhotoURL ? (
+            <Image source={{ uri: item.senderPhotoURL }} style={styles.avatar} />
+          ) : (
+            <View style={[
+              styles.defaultAvatar,
+              { backgroundColor: TIER_COLORS[item.tier]?.primary || TIER_COLORS.casual.primary }
+            ]}>
+              <Text style={styles.defaultAvatarText}>
+                {(item.senderName || '?').charAt(0).toUpperCase()}
+              </Text>
+            </View>
+          )}
+          <View style={styles.nameContainer}>
+            <Text style={styles.name}>{item.senderName}</Text>
+            <View style={styles.timestampContainer}>
+              <MaterialIcons name="schedule" size={12} color="#888" />
+              <Text style={styles.timestamp}>
+                {new Date(item.timestamp).toLocaleDateString(undefined, { 
+                  month: 'short', 
+                  day: 'numeric' 
+                })}
+              </Text>
+            </View>
+          </View>
+        </View>
+        <View style={styles.tierBadgeContainer}>
+          <LinearGradient
+            colors={TIER_COLORS[item.tier]?.gradient || TIER_COLORS.casual.gradient}
+            style={styles.tierBadge}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+          >
+            <Text style={styles.tierBadgeText}>{getTierDisplayName(item.tier)}</Text>
+          </LinearGradient>
+        </View>
       </View>
 
       {item.sharedInterests && item.sharedInterests.length > 0 && (
         <View style={styles.interestsContainer}>
           <Text style={styles.interestsLabel}>Shared Interests:</Text>
-          <Text style={styles.interests}>{item.sharedInterests.join(', ')}</Text>
+          <View style={styles.interestTagsContainer}>
+            {item.sharedInterests.map((interest, index) => (
+              <View key={index} style={styles.interestTag}>
+                <Text style={styles.interestTagText}>{interest}</Text>
+              </View>
+            ))}
+          </View>
         </View>
       )}
 
-      <View style={styles.actionButtons}>
+      <View style={styles.actionButtonsContainer}>
         <TouchableOpacity
-          style={[styles.actionButton, styles.acceptButton]}
-          onPress={() => handleAcceptConnection(item)}
+          style={styles.declineButton}
+          onPress={() => handleDeclineConnection(item.id)}
+          activeOpacity={0.7}
         >
-          <Text style={styles.actionButtonText}>Accept</Text>
+          <Text style={styles.declineButtonText}>Decline</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.actionButton, styles.declineButton]}
-          onPress={() => handleDeclineConnection(item.id)}
+          style={styles.acceptButton}
+          onPress={() => handleAcceptConnection(item)}
+          activeOpacity={0.7}
         >
-          <Text style={styles.actionButtonText}>Decline</Text>
+          <LinearGradient
+            colors={['#26de81', '#20bf6b']}
+            style={styles.acceptButtonGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+          >
+            <Text style={styles.acceptButtonText}>Accept</Text>
+          </LinearGradient>
         </TouchableOpacity>
       </View>
     </View>
@@ -292,33 +407,76 @@ export default function ConnectionsScreen() {
 
   // Render an active connection
   const renderConnection = ({ item }) => (
-    <TouchableOpacity 
-      style={styles.connectionItem}
-      onPress={() => handleViewChat(item)}
-    >
-      <View style={styles.connectionHeader}>
-        <Text style={styles.name}>{item.otherUserName}</Text>
-        <View style={styles.tierBadge}>
-          <Text style={styles.tierBadgeText}>{getTierDisplayName(item.tier)}</Text>
+    <View style={styles.connectionCard}>
+      <TouchableOpacity 
+        style={styles.userInfoRow}
+        onPress={() => handleViewProfile(item)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.userInfoContainer}>
+          {item.otherUserPhotoURL ? (
+            <Image source={{ uri: item.otherUserPhotoURL }} style={styles.avatar} />
+          ) : (
+            <View style={[
+              styles.defaultAvatar, 
+              { backgroundColor: TIER_COLORS[item.tier]?.primary || TIER_COLORS.casual.primary }
+            ]}>
+              <Text style={styles.defaultAvatarText}>
+                {(item.otherUserName || '?').charAt(0).toUpperCase()}
+              </Text>
+            </View>
+          )}
+          <View style={styles.nameContainer}>
+            <Text style={styles.name}>{item.otherUserName}</Text>
+            <View style={styles.tierSmallTag}>
+              <LinearGradient
+                colors={TIER_COLORS[item.tier]?.gradient || TIER_COLORS.casual.gradient}
+                style={styles.tierSmallBadge}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+              >
+                <Text style={styles.tierSmallText}>{getTierDisplayName(item.tier)}</Text>
+              </LinearGradient>
+            </View>
+          </View>
         </View>
-      </View>
+        <MaterialIcons name="chevron-right" size={24} color="#ccc" style={styles.chevronIcon} />
+      </TouchableOpacity>
 
       {item.sharedInterests && item.sharedInterests.length > 0 && (
         <View style={styles.interestsContainer}>
           <Text style={styles.interestsLabel}>Shared Interests:</Text>
-          <Text style={styles.interests}>
-            {item.sharedInterests.length > 3
-              ? `${item.sharedInterests.slice(0, 3).join(', ')} +${item.sharedInterests.length - 3} more`
-              : item.sharedInterests.join(', ')}
-          </Text>
+          <View style={styles.interestTagsContainer}>
+            {item.sharedInterests.slice(0, 3).map((interest, index) => (
+              <View key={index} style={styles.interestTag}>
+                <Text style={styles.interestTagText}>{interest}</Text>
+              </View>
+            ))}
+            {item.sharedInterests.length > 3 && (
+              <View style={styles.moreInterestsTag}>
+                <Text style={styles.moreInterestsText}>+{item.sharedInterests.length - 3}</Text>
+              </View>
+            )}
+          </View>
         </View>
       )}
 
-      <View style={styles.chatButton}>
-        <FontAwesome name="comments" size={14} color="#fff" />
-        <Text style={styles.chatButtonText}>Chat</Text>
-      </View>
-    </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.chatButton}
+        onPress={() => handleViewChat(item)}
+        activeOpacity={0.7}
+      >
+        <LinearGradient
+          colors={['#6C5CE7', '#a29bfe']}
+          style={styles.chatButtonGradient}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+        >
+          <Ionicons name="chatbubble-outline" size={16} color="#fff" />
+          <Text style={styles.chatButtonText}>Message</Text>
+        </LinearGradient>
+      </TouchableOpacity>
+    </View>
   );
 
   // Helper function to get display name for tier
@@ -333,10 +491,62 @@ export default function ConnectionsScreen() {
     }
   };
 
+  // Render empty state
+  const renderEmptyState = () => {
+    const isConnections = activeTab === 'connections';
+    
+    return (
+      <View style={styles.emptyContainer}>
+        <LinearGradient
+          colors={isConnections ? ['#6C5CE7', '#a29bfe'] : ['#ff9f43', '#f39c12']}
+          style={styles.emptyIconContainer}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        >
+          <MaterialIcons 
+            name={isConnections ? "people-outline" : "notifications-none"} 
+            size={40} 
+            color="#fff" 
+          />
+        </LinearGradient>
+        
+        <Text style={styles.emptyTitle}>
+          {isConnections 
+            ? 'No Connections Yet' 
+            : 'No Pending Requests'}
+        </Text>
+        
+        <Text style={styles.emptyText}>
+          {isConnections 
+            ? 'You don\'t have any connections yet. Explore the map to find people nearby!' 
+            : 'You don\'t have any pending connection requests at the moment.'}
+        </Text>
+        
+        {isConnections && (
+          <TouchableOpacity 
+            style={styles.exploreButton}
+            onPress={() => router.push('/map')}
+            activeOpacity={0.8}
+          >
+            <LinearGradient
+              colors={['#6C5CE7', '#a29bfe']}
+              style={styles.exploreButtonGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+            >
+              <MaterialIcons name="explore" size={18} color="#fff" style={{ marginRight: 8 }} />
+              <Text style={styles.exploreButtonText}>Explore Map</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007bff" />
+        <ActivityIndicator size="large" color="#6C5CE7" />
         <Text style={styles.loadingText}>Loading connections...</Text>
       </View>
     );
@@ -344,37 +554,97 @@ export default function ConnectionsScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Pending Connection Requests Section */}
-      {pendingConnections.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Connection Requests</Text>
-          <FlatList
-            data={pendingConnections}
-            renderItem={renderConnectionRequest}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={styles.listContainer}
-            scrollEnabled={false}
+      <StatusBar style="dark" />
+      
+      {/* Animated Header */}
+      <Animated.View style={[styles.animatedHeader, { opacity: headerOpacity }]}>
+        <Text style={styles.animatedHeaderText}>Connections</Text>
+      </Animated.View>
+      
+      {/* Main Content */}
+      <View style={styles.contentContainer}>
+        {/* Tab Navigation */}
+        <View style={styles.tabContainer}>
+          <TouchableOpacity 
+            style={[styles.tabButton, activeTab === 'connections' && styles.activeTabButton]}
+            onPress={() => setActiveTab('connections')}
+            activeOpacity={0.8}
+          >
+            <Text style={[
+              styles.tabButtonText, 
+              activeTab === 'connections' && styles.activeTabButtonText
+            ]}>
+              My Connections
+            </Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.tabButton, activeTab === 'requests' && styles.activeTabButton]}
+            onPress={() => setActiveTab('requests')}
+            activeOpacity={0.8}
+          >
+            <Text style={[
+              styles.tabButtonText, 
+              activeTab === 'requests' && styles.activeTabButtonText
+            ]}>
+              Requests
+            </Text>
+            
+            {pendingConnections.length > 0 && (
+              <View style={styles.tabBadge}>
+                <Text style={styles.tabBadgeText}>{pendingConnections.length}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+          
+          <Animated.View 
+            style={[
+              styles.tabIndicator, 
+              { 
+                left: tabIndicatorPosition.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: ['0%', '50%']
+                }) 
+              }
+            ]} 
           />
         </View>
-      )}
-
-      {/* Active Connections Section */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Your Connections</Text>
-        {connections.length > 0 ? (
-          <FlatList
-            data={connections}
-            renderItem={renderConnection}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={styles.listContainer}
-          />
+        
+        {/* Content based on active tab */}
+        {activeTab === 'connections' ? (
+          connections.length > 0 ? (
+            <Animated.FlatList
+              data={connections}
+              renderItem={renderConnection}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.listContainer}
+              showsVerticalScrollIndicator={false}
+              onScroll={Animated.event(
+                [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+                { useNativeDriver: true }
+              )}
+              scrollEventThrottle={16}
+            />
+          ) : (
+            renderEmptyState()
+          )
         ) : (
-          <View style={styles.emptyContainer}>
-            <FontAwesome name="users" size={60} color="#ccc" />
-            <Text style={styles.emptyText}>
-              You don't have any connections yet. Explore the map to find people nearby!
-            </Text>
-          </View>
+          pendingConnections.length > 0 ? (
+            <Animated.FlatList
+              data={pendingConnections}
+              renderItem={renderConnectionRequest}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.listContainer}
+              showsVerticalScrollIndicator={false}
+              onScroll={Animated.event(
+                [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+                { useNativeDriver: true }
+              )}
+              scrollEventThrottle={16}
+            />
+          ) : (
+            renderEmptyState()
+          )
         )}
       </View>
     </View>
@@ -384,144 +654,335 @@ export default function ConnectionsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 16,
-    backgroundColor: '#f8f8f8',
+    backgroundColor: '#f5f5f5',
+  },
+  animatedHeader: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: Platform.OS === 'ios' ? 90 : 60,
+    backgroundColor: '#fff',
+    zIndex: 1000,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    paddingBottom: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 5,
+  },
+  animatedHeaderText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  contentContainer: {
+    flex: 1,
+    paddingTop: 16,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#f5f5f5',
   },
   loadingText: {
-    marginTop: 12,
+    marginTop: 16,
     fontSize: 16,
     color: '#666',
   },
-  section: {
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
+  tabContainer: {
+    flexDirection: 'row',
     marginBottom: 16,
-    color: '#333',
+    paddingHorizontal: 16,
+    position: 'relative',
+  },
+  tabButton: {
+    flex: 1,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  activeTabButton: {
+    borderBottomColor: '#6C5CE7',
+  },
+  tabButtonText: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#888',
+  },
+  activeTabButtonText: {
+    fontWeight: '700',
+    color: '#6C5CE7',
+  },
+  tabIndicator: {
+    position: 'absolute',
+    bottom: 0,
+    width: '50%',
+    height: 3,
+    backgroundColor: '#6C5CE7',
+    borderRadius: 3,
+  },
+  tabBadge: {
+    position: 'absolute',
+    right: -8,
+    top: 8,
+    backgroundColor: '#ff4757',
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  tabBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
   },
   listContainer: {
-    paddingBottom: 20,
+    paddingHorizontal: 16,
+    paddingBottom: 24,
   },
-  connectionItem: {
+  connectionCard: {
     backgroundColor: '#fff',
-    padding: 16,
-    borderRadius: 8,
-    marginBottom: 12,
+    borderRadius: 16,
+    marginBottom: 16,
+    padding: CARD_PADDING,
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.2,
-    shadowRadius: 1.41,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
     elevation: 2,
   },
   connectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
+  },
+  userInfoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  userInfoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  chevronIcon: {
+    marginLeft: 8,
+  },
+  avatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    marginRight: 12,
+  },
+  defaultAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#a29bfe',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  defaultAvatarText: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  nameContainer: {
+    flex: 1,
   },
   name: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    flex: 1,
-  },
-  timestamp: {
-    fontSize: 12,
-    color: '#999',
-  },
-  tierContainer: {
-    marginBottom: 8,
-  },
-  tier: {
-    fontSize: 14,
-    color: '#666',
-    fontStyle: 'italic',
-  },
-  tierBadge: {
-    backgroundColor: '#007bff',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  tierBadgeText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  interestsContainer: {
-    marginTop: 4,
-    marginBottom: 12,
-  },
-  interestsLabel: {
-    fontSize: 14,
-    fontWeight: 'bold',
+    fontWeight: '600',
     color: '#333',
     marginBottom: 4,
   },
-  interests: {
-    fontSize: 14,
-    color: '#666',
+  timestampContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  actionButtons: {
+  timestamp: {
+    fontSize: 12,
+    color: '#888',
+    marginLeft: 4,
+  },
+  tierBadgeContainer: {
+    marginLeft: 8,
+  },
+  tierBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  tierBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  tierSmallTag: {
+    alignSelf: 'flex-start',
+  },
+  tierSmallBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  tierSmallText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  interestsContainer: {
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  interestsLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#555',
+    marginBottom: 8,
+  },
+  interestTagsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  interestTag: {
+    backgroundColor: '#f3f0ff',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  interestTagText: {
+    fontSize: 12,
+    color: '#6C5CE7',
+    fontWeight: '500',
+  },
+  moreInterestsTag: {
+    backgroundColor: '#f0f0f0',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  moreInterestsText: {
+    fontSize: 12,
+    color: '#888',
+    fontWeight: '500',
+  },
+  actionButtonsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: 8,
   },
-  actionButton: {
+  declineButton: {
     flex: 1,
-    paddingVertical: 10,
-    borderRadius: 6,
+    height: 46,
+    justifyContent: 'center',
     alignItems: 'center',
-    marginHorizontal: 4,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 12,
+    marginRight: 8,
+  },
+  declineButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#ff4757',
   },
   acceptButton: {
-    backgroundColor: '#28a745',
+    flex: 1,
+    height: 46,
+    borderRadius: 12,
+    overflow: 'hidden',
   },
-  declineButton: {
-    backgroundColor: '#dc3545',
+  acceptButtonGradient: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  actionButtonText: {
+  acceptButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
     color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 14,
   },
   chatButton: {
+    alignSelf: 'stretch',
+    height: 46,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  chatButtonGradient: {
+    flex: 1,
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#007bff',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 6,
-    alignSelf: 'flex-end',
-    marginTop: 8,
+    alignItems: 'center',
   },
   chatButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
     color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 14,
     marginLeft: 8,
   },
   emptyContainer: {
-    padding: 32,
-    alignItems: 'center',
+    flex: 1,
     justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+    paddingBottom: 40,
+  },
+  emptyIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 8,
   },
   emptyText: {
     fontSize: 16,
-    color: '#999',
+    color: '#666',
     textAlign: 'center',
-    marginTop: 16,
     lineHeight: 24,
+    marginBottom: 24,
+  },
+  exploreButton: {
+    width: SCREEN_WIDTH * 0.6,
+    height: 46,
+    borderRadius: 23,
+    overflow: 'hidden',
+    shadowColor: '#6C5CE7',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  exploreButtonGradient: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  exploreButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

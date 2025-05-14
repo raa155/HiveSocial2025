@@ -1,7 +1,21 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, FlatList, TouchableOpacity, ActivityIndicator, Image } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  StyleSheet, 
+  View, 
+  Text, 
+  FlatList, 
+  TouchableOpacity, 
+  ActivityIndicator, 
+  Image,
+  Animated,
+  StatusBar,
+  Dimensions,
+  Platform
+} from 'react-native';
 import { router } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
   collection, 
@@ -15,10 +29,20 @@ import {
 } from '@firebase/firestore';
 import { db } from '@/config/firebase';
 
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
 export default function ChatScreen() {
   const { user, userData } = useAuth();
   const [loading, setLoading] = useState(true);
   const [chatRooms, setChatRooms] = useState([]);
+  const scrollY = useRef(new Animated.Value(0)).current;
+  
+  // Animated header opacity for scroll effect
+  const headerOpacity = scrollY.interpolate({
+    inputRange: [0, 60],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
 
   // Load chat rooms
   useEffect(() => {
@@ -176,6 +200,7 @@ export default function ChatScreen() {
     <TouchableOpacity
       style={styles.chatItem}
       onPress={() => router.push(`/chat/${item.id}?name=${encodeURIComponent(item.otherUserName)}`)}
+      activeOpacity={0.7}
     >
       <View style={styles.avatar}>
         {item.otherUserPhotoURL ? (
@@ -185,12 +210,19 @@ export default function ChatScreen() {
             resizeMode="cover" 
           />
         ) : (
-          <FontAwesome name="user-circle" size={50} color="#ccc" />
+          <View style={styles.defaultAvatar}>
+            <Text style={styles.defaultAvatarText}>
+              {(item.otherUserName || '?').charAt(0).toUpperCase()}
+            </Text>
+          </View>
         )}
+        {/* Online status indicator would go here */}
       </View>
       <View style={styles.chatInfo}>
         <View style={styles.chatHeader}>
-          <Text style={styles.name}>{item.otherUserName}</Text>
+          <Text style={styles.name} numberOfLines={1}>
+            {item.otherUserName}
+          </Text>
           {item.lastMessageTimestamp && (
             <Text style={styles.timestamp}>
               {formatTimestamp(item.lastMessageTimestamp)}
@@ -200,18 +232,20 @@ export default function ChatScreen() {
         <View style={styles.chatFooter}>
           <View style={styles.lastMessageContainer}>
             <Text numberOfLines={1} style={styles.lastMessage}>
+              {/* Show "You: " prefix if last message was from current user */}
+              {item.lastMessageUserId === user?.uid ? 'You: ' : ''}
               {item.lastMessage}
             </Text>
             
             {/* Show status for last message if it's from the current user */}
             {item.lastMessageUserId === user?.uid && item.messageStatus && (
-              <View style={styles.statusIconSmall}>
+              <View style={styles.statusIconContainer}>
                 {item.messageStatus.read ? (
-                  <FontAwesome name="check-circle" size={10} color="#4caf50" />
+                  <MaterialIcons name="done-all" size={16} color="#6C5CE7" />
                 ) : item.messageStatus.delivered ? (
-                  <FontAwesome name="check" size={10} color="#2196f3" />
+                  <MaterialIcons name="done" size={16} color="#a29bfe" />
                 ) : (
-                  <FontAwesome name="clock-o" size={10} color="#bdbdbd" />
+                  <MaterialIcons name="access-time" size={14} color="#bdbdbd" />
                 )}
               </View>
             )}
@@ -230,7 +264,7 @@ export default function ChatScreen() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007bff" />
+        <ActivityIndicator size="large" color="#6C5CE7" />
         <Text style={styles.loadingText}>Loading chats...</Text>
       </View>
     );
@@ -246,29 +280,67 @@ export default function ChatScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Messages</Text>
-      {sortedChatRooms.length > 0 ? (
-        <FlatList
-          data={sortedChatRooms}
-          renderItem={renderChatItem}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContainer}
-        />
-      ) : (
-        <View style={styles.emptyContainer}>
-          <FontAwesome name="comments-o" size={60} color="#ccc" />
-          <Text style={styles.emptyText}>No messages yet</Text>
-          <Text style={styles.emptySubtext}>
-            Connect with people around you to start chatting!
-          </Text>
-          <TouchableOpacity 
-            style={styles.exploreButton}
-            onPress={() => router.push('/map')}
-          >
-            <Text style={styles.exploreButtonText}>Explore Map</Text>
+      <StatusBar style="dark" />
+      
+      {/* Animated Header */}
+      <Animated.View style={[styles.animatedHeader, { opacity: headerOpacity }]}>
+        <Text style={styles.animatedHeaderText}>Messages</Text>
+      </Animated.View>
+      
+      {/* Main Content */}
+      <View style={styles.contentContainer}>
+        {/* Header */}
+        <View style={styles.headerContainer}>
+          <Text style={styles.title}>Messages</Text>
+          <TouchableOpacity style={styles.searchButton}>
+            <MaterialIcons name="search" size={24} color="#6C5CE7" />
           </TouchableOpacity>
         </View>
-      )}
+        
+        {sortedChatRooms.length > 0 ? (
+          <Animated.FlatList
+            data={sortedChatRooms}
+            renderItem={renderChatItem}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.listContainer}
+            showsVerticalScrollIndicator={false}
+            onScroll={Animated.event(
+              [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+              { useNativeDriver: true }
+            )}
+            scrollEventThrottle={16}
+          />
+        ) : (
+          <View style={styles.emptyContainer}>
+            <LinearGradient
+              colors={['#6C5CE7', '#a29bfe']}
+              style={styles.emptyIconBackground}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <MaterialIcons name="chat-bubble-outline" size={40} color="#fff" />
+            </LinearGradient>
+            <Text style={styles.emptyText}>No messages yet</Text>
+            <Text style={styles.emptySubtext}>
+              Connect with people around you to start chatting!
+            </Text>
+            <TouchableOpacity 
+              style={styles.exploreButton}
+              onPress={() => router.push('/map')}
+              activeOpacity={0.8}
+            >
+              <LinearGradient
+                colors={['#6C5CE7', '#a29bfe']}
+                style={styles.exploreButtonGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+              >
+                <Text style={styles.exploreButtonText}>Explore Map</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
     </View>
   );
 }
@@ -276,55 +348,111 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 16,
-    backgroundColor: '#f8f8f8',
+    backgroundColor: '#f5f5f5',
+  },
+  animatedHeader: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: Platform.OS === 'ios' ? 90 : 60,
+    backgroundColor: '#fff',
+    zIndex: 1000,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    paddingBottom: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 5,
+  },
+  animatedHeaderText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  contentContainer: {
+    flex: 1,
+    paddingTop: 16,
+  },
+  headerContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  searchButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#f5f5f5',
   },
   loadingText: {
-    marginTop: 12,
+    marginTop: 16,
     fontSize: 16,
     color: '#666',
   },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 16,
-    color: '#333',
-  },
   listContainer: {
+    paddingHorizontal: 16,
     paddingBottom: 20,
   },
   chatItem: {
     flexDirection: 'row',
     backgroundColor: '#fff',
-    padding: 12,
-    borderRadius: 8,
+    padding: 16,
+    borderRadius: 16,
     marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
       height: 1,
     },
-    shadowOpacity: 0.2,
-    shadowRadius: 1.41,
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
     elevation: 2,
   },
   avatar: {
+    position: 'relative',
     marginRight: 12,
     justifyContent: 'center',
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     overflow: 'hidden',
+    backgroundColor: '#f3f0ff',
   },
   avatarImage: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+  },
+  defaultAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#a29bfe',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  defaultAvatarText: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#fff',
   },
   chatInfo: {
     flex: 1,
@@ -333,7 +461,8 @@ const styles = StyleSheet.create({
   chatHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 4,
+    alignItems: 'center',
+    marginBottom: 6,
   },
   chatFooter: {
     flexDirection: 'row',
@@ -342,12 +471,14 @@ const styles = StyleSheet.create({
   },
   name: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '600',
     color: '#333',
+    flex: 1,
+    marginRight: 8,
   },
   timestamp: {
     fontSize: 12,
-    color: '#999',
+    color: '#888',
   },
   lastMessageContainer: {
     flexDirection: 'row',
@@ -359,18 +490,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     flex: 1,
-    marginRight: 4,
   },
-  statusIconSmall: {
-    marginLeft: 2,
-  },
-  unreadBadge: {
-    backgroundColor: '#007bff',
-    borderRadius: 10,
-    width: 20,
-    height: 20,
+  statusIconContainer: {
+    marginLeft: 4,
+    width: 16,
+    height: 16,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  unreadBadge: {
+    backgroundColor: '#6C5CE7',
+    borderRadius: 12,
+    minWidth: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 8,
   },
   unreadText: {
     color: '#fff',
@@ -381,27 +516,45 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingBottom: 100,
+    paddingHorizontal: 32,
+  },
+  emptyIconBackground: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
   },
   emptyText: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
-    color: '#666',
-    marginTop: 12,
+    color: '#333',
+    marginTop: 8,
   },
   emptySubtext: {
-    fontSize: 14,
-    color: '#999',
+    fontSize: 16,
+    color: '#666',
     textAlign: 'center',
     marginTop: 8,
-    marginHorizontal: 40,
+    lineHeight: 24,
   },
   exploreButton: {
-    marginTop: 20,
-    backgroundColor: '#007bff',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 8,
+    marginTop: 24,
+    width: SCREEN_WIDTH * 0.6,
+    height: 50,
+    borderRadius: 25,
+    overflow: 'hidden',
+    shadowColor: '#6C5CE7',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  exploreButtonGradient: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   exploreButtonText: {
     color: '#fff',

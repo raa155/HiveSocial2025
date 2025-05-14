@@ -1,7 +1,26 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { StyleSheet, View, Text, TextInput, TouchableOpacity, FlatList, KeyboardAvoidingView, Platform, Image, ActivityIndicator } from 'react-native';
+import { 
+  StyleSheet, 
+  View, 
+  Text, 
+  TextInput, 
+  TouchableOpacity, 
+  FlatList, 
+  KeyboardAvoidingView, 
+  Platform, 
+  Image, 
+  ActivityIndicator,
+  Animated,
+  Dimensions,
+  SafeAreaView
+} from 'react-native';
 import { Stack, useLocalSearchParams, router } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
   collection, 
@@ -19,6 +38,9 @@ import {
 } from '@firebase/firestore';
 import { db } from '@/config/firebase';
 
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const BUBBLE_MAX_WIDTH = SCREEN_WIDTH * 0.75;
+
 export default function ChatRoomScreen() {
   const { user, userData } = useAuth();
   const { id: chatId, name } = useLocalSearchParams();
@@ -28,7 +50,15 @@ export default function ChatRoomScreen() {
   const [otherUser, setOtherUser] = useState(null);
   const [isTyping, setIsTyping] = useState(false);
   const [otherUserTyping, setOtherUserTyping] = useState(false);
+  const [inputHeight, setInputHeight] = useState(50);
   const typingTimeoutRef = useRef(null);
+  
+  // Animation values
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const contentOffsetY = useRef(new Animated.Value(0)).current;
+  
+  // Reference to FlatList for scrolling
+  const flatListRef = useRef(null);
 
   // Load chat messages
   useEffect(() => {
@@ -87,6 +117,13 @@ export default function ChatRoomScreen() {
         
         setMessages(messageList);
         setLoading(false);
+        
+        // Fade in animation
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }).start();
       }, error => {
         console.error('Error fetching messages:', error);
         setLoading(false);
@@ -173,21 +210,56 @@ export default function ChatRoomScreen() {
       
       // Clear the input
       setNewMessage('');
+      setInputHeight(50); // Reset input height
+      
+      // Scroll to bottom if needed
+      if (flatListRef.current) {
+        flatListRef.current.scrollToOffset({ animated: true, offset: 0 });
+      }
     } catch (error) {
       console.error('Error sending message:', error);
       alert('Error sending message. Please try again.');
     }
   };
 
+  // Determine if we should show avatar and timestamp for this message
+  const shouldShowAvatarAndTime = (currentMessage, previousMessage, nextMessage) => {
+    // Always show for the first message in a group
+    if (!nextMessage) return true;
+    
+    // If next message is from a different user, show avatar/time
+    if (nextMessage.userId !== currentMessage.userId) return true;
+    
+    // If the time difference between messages is greater than 5 minutes, show
+    const timeDiff = Math.abs(
+      nextMessage.createdAt.getTime() - currentMessage.createdAt.getTime()
+    );
+    if (timeDiff > 5 * 60 * 1000) return true;
+    
+    return false;
+  };
+
   const renderMessage = ({ item, index }) => {
     const isUser = item.userId === user?.uid;
     const isSystem = item.system;
-    const showAvatar = !isUser && !isSystem && (!messages[index + 1] || messages[index + 1].userId !== item.userId);
+    const previousMessage = messages[index + 1];
+    const nextMessage = messages[index - 1];
+    
+    const showAvatarAndTime = !isUser && 
+                              !isSystem && 
+                              shouldShowAvatarAndTime(item, previousMessage, nextMessage);
+    
+    // Determine if this is the first message in a group (for styling)
+    const isFirstInGroup = !previousMessage || previousMessage.userId !== item.userId;
+    
+    // Determine if this is the last message in a group (for styling)
+    const isLastInGroup = !nextMessage || nextMessage.userId !== item.userId;
     
     // Format the timestamp
     const timestamp = item.createdAt ? 
       item.createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
     
+    // System message (like "User joined the conversation")
     if (isSystem) {
       return (
         <View style={styles.systemMessageContainer}>
@@ -201,64 +273,68 @@ export default function ChatRoomScreen() {
         styles.messageRow,
         isUser ? styles.userMessageRow : styles.otherMessageRow
       ]}>
-        {!isUser && showAvatar && (
+        {/* Avatar (only show for other user's messages when needed) */}
+        {!isUser && showAvatarAndTime ? (
           <View style={styles.avatarContainer}>
             {otherUser?.photoURL ? (
               <Image source={{ uri: otherUser.photoURL }} style={styles.avatar} />
             ) : (
               <View style={styles.defaultAvatar}>
                 <Text style={styles.defaultAvatarText}>
-                  {(otherUser?.name || 'U').charAt(0)}
+                  {(otherUser?.name || 'U').charAt(0).toUpperCase()}
                 </Text>
               </View>
             )}
           </View>
+        ) : (
+          // Empty space to align messages properly
+          <View style={!isUser ? styles.avatarSpacer : null} />
         )}
         
-        <View 
-          style={[
-            styles.messageContainer,
-            isUser ? styles.userMessage : styles.otherMessage,
-            !isUser && !showAvatar && styles.consecutiveMessage
-          ]}
-        >
+        {/* Message bubble */}
+        <View style={[
+          styles.messageContainer,
+          isUser ? styles.userMessage : styles.otherMessage,
+          isFirstInGroup && (isUser ? styles.userFirstInGroup : styles.otherFirstInGroup),
+          isLastInGroup && (isUser ? styles.userLastInGroup : styles.otherLastInGroup),
+          !isFirstInGroup && !isLastInGroup && styles.messageInMiddle,
+          !isUser && !showAvatarAndTime && styles.consecutiveMessage
+        ]}>
+          {/* Message content */}
           <Text style={[
             styles.messageText,
-            isUser && { color: '#fff' }
+            isUser && styles.userMessageText
           ]}>
             {item.text}
           </Text>
-          <View style={[
-            styles.messageFooter,
-            isUser && { justifyContent: 'flex-end' }
-          ]}>
-            <Text style={[
-              styles.timestampText,
-              isUser && { color: 'rgba(255, 255, 255, 0.7)' }
+          
+          {/* Time and delivery indicators (only show for last message in group) */}
+          {isLastInGroup && (
+            <View style={[
+              styles.messageFooter,
+              isUser ? styles.userMessageFooter : styles.otherMessageFooter
             ]}>
-              {timestamp}
-            </Text>
-            
-            {/* Message status indicators (for user's messages only) */}
-            {isUser && item.status && (
-              <View style={styles.statusContainer}>
-                {item.status.read ? (
-                  <View style={styles.readStatusContainer}>
-                    <FontAwesome name="check-circle" size={12} color="#4caf50" style={styles.statusIcon} />
-                    {item.status.readAt && (
-                      <Text style={styles.readAtText}>
-                        {new Date(item.status.readAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </Text>
-                    )}
-                  </View>
-                ) : item.status.delivered ? (
-                  <FontAwesome name="check" size={12} color="#2196f3" style={styles.statusIcon} />
-                ) : (
-                  <FontAwesome name="clock-o" size={12} color="#bdbdbd" style={styles.statusIcon} />
-                )}
-              </View>
-            )}
-          </View>
+              <Text style={[
+                styles.timestampText,
+                isUser && styles.userTimestampText
+              ]}>
+                {timestamp}
+              </Text>
+              
+              {/* Delivery status (only for user's messages) */}
+              {isUser && item.status && (
+                <View style={styles.statusContainer}>
+                  {item.status.read ? (
+                    <MaterialIcons name="done-all" size={14} color="#fff" />
+                  ) : item.status.delivered ? (
+                    <MaterialIcons name="done" size={14} color="rgba(255,255,255,0.8)" />
+                  ) : (
+                    <MaterialIcons name="access-time" size={12} color="rgba(255,255,255,0.5)" />
+                  )}
+                </View>
+              )}
+            </View>
+          )}
         </View>
       </View>
     );
@@ -322,93 +398,216 @@ export default function ChatRoomScreen() {
 
   // Handle going back to the chat list
   const handleGoBack = useCallback(() => {
-    if (Platform.OS === 'ios') {
-      // For iOS, use standard back
-      router.back();
-    } else {
-      // For Android, explicitly navigate to ensure proper cleanup
-      router.push('/(tabs)/chat');
-    }
+    // Fade out animation
+    Animated.timing(fadeAnim, {
+      toValue: 0,
+      duration: 200,
+      useNativeDriver: true,
+    }).start(() => {
+      if (Platform.OS === 'ios') {
+        // For iOS, use standard back
+        router.back();
+      } else {
+        // For Android, explicitly navigate to ensure proper cleanup
+        router.push('/(tabs)/chat');
+      }
+    });
   }, []);
+  
+  // Calculate content container padding bottom based on input height
+  const contentPaddingBottom = inputHeight + 16;
+
+  // Header component for FlatList (actually appears at the bottom since list is inverted)
+  const ListHeaderComponent = useCallback(() => (
+    <View style={{ paddingVertical: 20 }}>
+      {otherUserTyping && (
+        <View style={styles.typingIndicatorContainer}>
+          <View style={styles.typingBubble}>
+            <View style={styles.typingDot} />
+            <View style={[styles.typingDot, styles.typingDotMiddle]} />
+            <View style={styles.typingDot} />
+          </View>
+          <Text style={styles.typingText}>
+            {otherUser?.name || 'User'} is typing...
+          </Text>
+        </View>
+      )}
+    </View>
+  ), [otherUserTyping, otherUser]);
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : null}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-    >
-      <Stack.Screen
-        options={{
-          title: name || 'Chat',
-          headerLeft: () => (
-            <TouchableOpacity onPress={handleGoBack} style={styles.headerButton}>
-              <FontAwesome name="arrow-left" size={20} color="#007bff" />
-            </TouchableOpacity>
-          ),
-        }}
-      />
-      
-      {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#007bff" />
-          <Text style={styles.loadingText}>Loading messages...</Text>
-        </View>
-      ) : (
-        <>
-          <FlatList
-            data={messages}
-            renderItem={renderMessage}
-            keyExtractor={(item) => item.id}
-            inverted={true} // Display most recent messages at the bottom
-            contentContainerStyle={styles.messagesList}
-          />
-          
-          {otherUserTyping && (
-            <View style={styles.typingIndicatorContainer}>
-              <View style={styles.typingBubble}>
-                <View style={styles.typingDot} />
-                <View style={[styles.typingDot, styles.typingDotMiddle]} />
-                <View style={styles.typingDot} />
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar style="dark" />
+      <Animated.View 
+        style={[styles.container, { opacity: fadeAnim }]}
+      >
+        <Stack.Screen
+          options={{
+            headerShown: true,
+            headerStyle: {
+              backgroundColor: '#fff',
+            },
+            headerShadowVisible: false,
+            headerTitle: () => (
+              <View style={styles.headerTitleContainer}>
+                {otherUser?.photoURL ? (
+                  <Image 
+                    source={{ uri: otherUser.photoURL }} 
+                    style={styles.headerAvatar} 
+                  />
+                ) : (
+                  <View style={styles.headerDefaultAvatar}>
+                    <Text style={styles.headerDefaultAvatarText}>
+                      {(name || '?').charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                )}
+                <Text style={styles.headerTitle} numberOfLines={1}>
+                  {name || 'Chat'}
+                </Text>
               </View>
-              <Text style={styles.typingText}>
-                {otherUser?.name || 'User'} is typing...
-              </Text>
+            ),
+            headerLeft: () => (
+              <TouchableOpacity onPress={handleGoBack} style={styles.headerButton}>
+                <Ionicons name="arrow-back" size={24} color="#6C5CE7" />
+              </TouchableOpacity>
+            ),
+            headerRight: () => (
+              <TouchableOpacity style={styles.headerButton}>
+                <Ionicons name="ellipsis-vertical" size={24} color="#6C5CE7" />
+              </TouchableOpacity>
+            ),
+          }}
+        />
+        
+        <KeyboardAvoidingView
+          style={styles.keyboardAvoidingView}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+        >
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#6C5CE7" />
+              <Text style={styles.loadingText}>Loading messages...</Text>
+            </View>
+          ) : (
+            <View style={styles.chatContainer}>
+              {/* Messages List */}
+              <Animated.FlatList
+                ref={flatListRef}
+                data={messages}
+                renderItem={renderMessage}
+                keyExtractor={(item) => item.id}
+                inverted={true} // Display most recent messages at the bottom
+                contentContainerStyle={[
+                  styles.messagesList,
+                  { paddingBottom: contentPaddingBottom }
+                ]}
+                showsVerticalScrollIndicator={false}
+                ListHeaderComponent={ListHeaderComponent}
+                onScroll={Animated.event(
+                  [{ nativeEvent: { contentOffset: { y: contentOffsetY } } }],
+                  { useNativeDriver: true }
+                )}
+              />
+              
+              {/* Input Container */}
+              <View style={styles.inputContainer}>
+                <View style={styles.inputWrapper}>
+                  <TouchableOpacity style={styles.attachButton}>
+                    <Ionicons name="add-circle-outline" size={24} color="#6C5CE7" />
+                  </TouchableOpacity>
+                  
+                  <TextInput
+                    style={[styles.input, { height: Math.max(40, inputHeight) }]}
+                    value={newMessage}
+                    onChangeText={handleTyping}
+                    placeholder="Type a message..."
+                    placeholderTextColor="#999"
+                    multiline={true}
+                    maxHeight={120}
+                    onContentSizeChange={(e) => {
+                      const height = e.nativeEvent.contentSize.height;
+                      setInputHeight(Math.min(Math.max(40, height), 120));
+                    }}
+                  />
+                  
+                  <TouchableOpacity style={styles.emojiButton}>
+                    <Ionicons name="happy-outline" size={24} color="#6C5CE7" />
+                  </TouchableOpacity>
+                </View>
+                
+                <TouchableOpacity
+                  style={[
+                    styles.sendButton,
+                    !newMessage.trim() && styles.sendButtonDisabled
+                  ]}
+                  onPress={handleSendMessage}
+                  disabled={!newMessage.trim()}
+                  activeOpacity={0.7}
+                >
+                  <LinearGradient
+                    colors={!newMessage.trim() ? ['#ccc', '#ccc'] : ['#6C5CE7', '#a29bfe']}
+                    style={styles.sendButtonGradient}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                  >
+                    <MaterialIcons name="send" size={20} color="#fff" />
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
             </View>
           )}
-          
-          <View style={styles.inputContainer}>
-            <TextInput
-              style={styles.input}
-              value={newMessage}
-              onChangeText={handleTyping}
-              placeholder="Type a message..."
-              multiline={true}
-              maxHeight={100}
-            />
-            <TouchableOpacity
-              style={[
-                styles.sendButton,
-                !newMessage.trim() && styles.sendButtonDisabled
-              ]}
-              onPress={handleSendMessage}
-              disabled={!newMessage.trim()}
-            >
-              <FontAwesome name="send" size={20} color="#fff" />
-            </TouchableOpacity>
-          </View>
-        </>
-      )}
-    </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
+      </Animated.View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
   container: {
     flex: 1,
-    backgroundColor: '#f8f8f8',
+    backgroundColor: '#f5f5f5',
+  },
+  keyboardAvoidingView: {
+    flex: 1,
   },
   headerButton: {
-    padding: 10,
+    padding: 8,
+  },
+  headerTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 8,
+  },
+  headerDefaultAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#a29bfe',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  headerDefaultAvatarText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  headerTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#333',
+    maxWidth: SCREEN_WIDTH - 150, // Adjust based on header button widths
   },
   loadingContainer: {
     flex: 1,
@@ -416,16 +615,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadingText: {
-    marginTop: 12,
+    marginTop: 16,
     fontSize: 16,
     color: '#666',
   },
+  chatContainer: {
+    flex: 1,
+    position: 'relative',
+  },
   messagesList: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingTop: 10,
   },
   messageRow: {
     flexDirection: 'row',
-    marginBottom: 12,
+    marginVertical: 2,
     alignItems: 'flex-end',
   },
   userMessageRow: {
@@ -435,112 +639,126 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
   },
   avatarContainer: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     marginRight: 8,
     overflow: 'hidden',
   },
+  avatarSpacer: {
+    width: 38, // Avatar width + margin
+  },
   avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
   },
   defaultAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#ccc',
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#a29bfe',
     justifyContent: 'center',
     alignItems: 'center',
   },
   defaultAvatarText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 'bold',
     color: '#fff',
   },
   messageContainer: {
-    maxWidth: '75%',
+    maxWidth: BUBBLE_MAX_WIDTH,
     padding: 12,
-    borderRadius: 16,
+    borderRadius: 18,
     position: 'relative',
   },
   userMessage: {
-    backgroundColor: '#007bff',
-    borderBottomRightRadius: 4,
+    backgroundColor: '#6C5CE7',
   },
   otherMessage: {
     backgroundColor: '#f0f0f0',
-    borderBottomLeftRadius: 4,
+  },
+  userFirstInGroup: {
+    borderTopRightRadius: 18,
+  },
+  userLastInGroup: {
+    borderBottomRightRadius: 18,
+  },
+  otherFirstInGroup: {
+    borderTopLeftRadius: 18,
+  },
+  otherLastInGroup: {
+    borderBottomLeftRadius: 18,
+  },
+  messageInMiddle: {
+    borderRadius: 18,
   },
   consecutiveMessage: {
-    marginLeft: 44, // To align with the avatar
+    marginLeft: 38, // To align with the avatar
   },
   messageText: {
     fontSize: 16,
     color: '#333',
-    marginBottom: 4,
+  },
+  userMessageText: {
+    color: '#fff',
   },
   messageFooter: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 2,
+    marginTop: 4,
+  },
+  userMessageFooter: {
+    justifyContent: 'flex-end',
+  },
+  otherMessageFooter: {
+    justifyContent: 'flex-start',
   },
   timestampText: {
-    fontSize: 10,
+    fontSize: 11,
     color: 'rgba(0, 0, 0, 0.5)',
+  },
+  userTimestampText: {
+    color: 'rgba(255, 255, 255, 0.7)',
   },
   statusContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     marginLeft: 4,
   },
-  statusIcon: {
-    marginLeft: 4,
-  },
-  readStatusContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  readAtText: {
-    fontSize: 9,
-    color: 'rgba(255, 255, 255, 0.7)',
-    marginLeft: 2,
-  },
   systemMessageContainer: {
     alignItems: 'center',
-    marginVertical: 12,
+    marginVertical: 16,
   },
   systemMessageText: {
-    fontSize: 12,
-    color: '#999',
+    fontSize: 13,
+    color: '#888',
     backgroundColor: 'rgba(0, 0, 0, 0.05)',
-    borderRadius: 10,
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
   typingIndicatorContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 8,
-    paddingLeft: 16,
+    marginLeft: 46, // Align with messages
+    marginBottom: 8,
   },
   typingBubble: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#f0f0f0',
-    borderRadius: 10,
-    padding: 6,
-    width: 40,
+    borderRadius: 12,
+    padding: 8,
+    width: 48,
     justifyContent: 'center',
   },
   typingDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#999',
-    marginHorizontal: 1,
+    backgroundColor: '#a29bfe',
+    marginHorizontal: 2,
     opacity: 0.6,
   },
   typingDotMiddle: {
@@ -556,30 +774,49 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
+    padding: 8,
+    paddingHorizontal: 16,
     backgroundColor: '#fff',
     borderTopWidth: 1,
-    borderTopColor: '#eee',
+    borderTopColor: '#f0f0f0',
+  },
+  inputWrapper: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: '#f5f5f5',
+    borderRadius: 24,
+    paddingHorizontal: 8,
+    marginRight: 8,
+    alignItems: 'center',
+  },
+  attachButton: {
+    padding: 8,
+  },
+  emojiButton: {
+    padding: 8,
   },
   input: {
     flex: 1,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    marginRight: 10,
     fontSize: 16,
+    paddingVertical: 8,
+    color: '#333',
     maxHeight: 120,
   },
   sendButton: {
-    backgroundColor: '#007bff',
     width: 44,
     height: 44,
     borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
+  },
+  sendButtonGradient: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   sendButtonDisabled: {
-    backgroundColor: '#ccc',
+    opacity: 0.7,
   },
 });

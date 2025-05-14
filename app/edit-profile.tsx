@@ -1,12 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, FlatList, Image, Platform, Dimensions } from 'react-native';
+import { 
+  StyleSheet, 
+  View, 
+  Text, 
+  TextInput, 
+  TouchableOpacity, 
+  ScrollView, 
+  Alert, 
+  ActivityIndicator, 
+  FlatList, 
+  Image, 
+  Platform, 
+  Dimensions,
+  Animated,
+} from 'react-native';
 import { Stack, router } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import * as ImagePicker from 'expo-image-picker';
 import { doc, updateDoc } from '@firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from '@firebase/storage';
 import { db, storage } from '@/config/firebase';
 import { useAuth } from '@/contexts/AuthContext';
+import { StatusBar } from 'expo-status-bar';
 
 // Sample interests list - in a real app, this could be fetched from Firestore
 const INTERESTS = [
@@ -16,6 +33,9 @@ const INTERESTS = [
   'Gardening', 'Pets', 'Yoga', 'Meditation', 'Programming',
   'Coffee', 'Wine', 'Food', 'Cycling', 'Running'
 ];
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const CARD_PADDING = 20;
 
 export default function EditProfileScreen() {
   const { user, userData, refreshUserData } = useAuth();
@@ -29,7 +49,10 @@ export default function EditProfileScreen() {
   const [locationVisible, setLocationVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
-
+  
+  // For subtle animations
+  const fadeAnim = useState(new Animated.Value(0))[0];
+  
   // Load user data when the component mounts
   useEffect(() => {
     if (userData) {
@@ -60,6 +83,13 @@ export default function EditProfileScreen() {
       if (userData.location && typeof userData.location.visible === 'boolean') {
         setLocationVisible(userData.location.visible);
       }
+      
+      // Run the fade-in animation
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 600,
+        useNativeDriver: true,
+      }).start();
     }
   }, [userData]);
 
@@ -364,6 +394,7 @@ export default function EditProfileScreen() {
         selectedInterests.includes(item) && styles.interestTagSelected
       ]}
       onPress={() => toggleInterest(item)}
+      activeOpacity={0.7}
     >
       <Text 
         style={[
@@ -377,21 +408,41 @@ export default function EditProfileScreen() {
   );
 
   return (
-    <View style={styles.container}>
-      <Stack.Screen options={{ title: 'Edit Profile', headerShown: true }} />
+    <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
+      <StatusBar style="dark" />
+      <Stack.Screen 
+        options={{ 
+          headerShown: true,
+          headerStyle: {
+            backgroundColor: '#fff',
+          },
+          headerTitleStyle: {
+            fontWeight: '600',
+            color: '#333',
+          },
+          headerShadowVisible: false,
+          headerTitle: 'Edit Profile',
+        }} 
+      />
       
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView 
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Profile Image Section */}
         <View style={styles.profileImageSection}>
           <TouchableOpacity 
             style={styles.profileImageContainer}
             onPress={pickImage}
             disabled={uploadingImage || loading}
+            activeOpacity={0.9}
           >
             {profileImage ? (
               <Image source={{ uri: profileImage }} style={styles.profileImage} />
             ) : (
-              <FontAwesome name="user-circle" size={100} color="#ccc" />
+              <View style={styles.placeholderImage}>
+                <FontAwesome name="user" size={50} color="#fff" />
+              </View>
             )}
             
             {uploadingImage && (
@@ -401,15 +452,49 @@ export default function EditProfileScreen() {
             )}
             
             <View style={styles.editIconContainer}>
-              <FontAwesome name="camera" size={16} color="#fff" />
+              <MaterialIcons name="camera-alt" size={20} color="#fff" />
             </View>
           </TouchableOpacity>
-          <Text style={styles.changePhotoText}>Tap to change main profile photo</Text>
+          <Text style={styles.changePhotoText}>Tap to change profile photo</Text>
         </View>
         
-        {/* Profile Images Grid Section */}
-        <View style={styles.section}>
-          <Text style={styles.label}>Photo Gallery</Text>
+        {/* Card for Name and Bio */}
+        <View style={styles.card}>
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Name</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Your name"
+              value={name}
+              onChangeText={setName}
+              maxLength={50}
+              editable={!loading}
+              placeholderTextColor="#aaa"
+            />
+          </View>
+          
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Bio</Text>
+            <TextInput
+              style={styles.bioInput}
+              placeholder="Tell us about yourself..."
+              value={bio}
+              onChangeText={setBio}
+              multiline
+              maxLength={200}
+              editable={!loading}
+              placeholderTextColor="#aaa"
+            />
+            <Text style={styles.charCount}>{bio?.length || 0}/200</Text>
+          </View>
+        </View>
+        
+        {/* Photo Gallery Card */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <MaterialIcons name="photo-library" size={20} color="#6C5CE7" />
+            <Text style={styles.cardTitle}>Photo Gallery</Text>
+          </View>
           <Text style={styles.subLabel}>
             Add up to 6 photos to your profile gallery ({profileImages.length}/6)
           </Text>
@@ -424,7 +509,7 @@ export default function EditProfileScreen() {
                   onPress={() => removeProfileImage(imageUrl, index)}
                   disabled={loading}
                 >
-                  <FontAwesome name="times" size={16} color="#fff" />
+                  <MaterialIcons name="close" size={16} color="#fff" />
                 </TouchableOpacity>
               </View>
             ))}
@@ -435,12 +520,13 @@ export default function EditProfileScreen() {
                 style={styles.addImageButton}
                 onPress={pickProfileImages}
                 disabled={uploadingImage || loading}
+                activeOpacity={0.7}
               >
                 {uploadingImage ? (
-                  <ActivityIndicator size="small" color="#007bff" />
+                  <ActivityIndicator size="small" color="#6C5CE7" />
                 ) : (
                   <>
-                    <FontAwesome name="plus" size={24} color="#007bff" />
+                    <MaterialIcons name="add-photo-alternate" size={28} color="#6C5CE7" />
                     <Text style={styles.addImageText}>Add Photos</Text>
                   </>
                 )}
@@ -449,34 +535,12 @@ export default function EditProfileScreen() {
           </View>
         </View>
         
-        <View style={styles.section}>
-          <Text style={styles.label}>Name</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Your name"
-            value={name}
-            onChangeText={setName}
-            maxLength={50}
-            editable={!loading}
-          />
-        </View>
-        
-        <View style={styles.section}>
-          <Text style={styles.label}>Bio</Text>
-          <TextInput
-            style={styles.bioInput}
-            placeholder="Tell us about yourself..."
-            value={bio}
-            onChangeText={setBio}
-            multiline
-            maxLength={200}
-            editable={!loading}
-          />
-          <Text style={styles.charCount}>{bio?.length || 0}/200</Text>
-        </View>
-        
-        <View style={styles.section}>
-          <Text style={styles.label}>Your Interests</Text>
+        {/* Interests Card */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <MaterialIcons name="favorite" size={20} color="#6C5CE7" />
+            <Text style={styles.cardTitle}>Your Interests</Text>
+          </View>
           <Text style={styles.subLabel}>
             Select interests to connect with like-minded people ({selectedInterests.length + customInterests.length} selected)
           </Text>
@@ -501,6 +565,7 @@ export default function EditProfileScreen() {
                 onChangeText={setCustomInterest}
                 maxLength={20}
                 editable={!loading}
+                placeholderTextColor="#aaa"
               />
               <TouchableOpacity
                 style={[styles.addButton, (!customInterest.trim() || loading) && styles.addButtonDisabled]}
@@ -522,7 +587,7 @@ export default function EditProfileScreen() {
                       onPress={() => removeCustomInterest(interest)}
                       disabled={loading}
                     >
-                      <FontAwesome name="times" size={14} color="#fff" />
+                      <MaterialIcons name="close" size={12} color="#fff" />
                     </TouchableOpacity>
                   </View>
                 ))}
@@ -531,17 +596,30 @@ export default function EditProfileScreen() {
           </View>
         </View>
         
-        {/* Location Visibility Toggle */}
-        <View style={styles.section}>
-          <Text style={styles.label}>Location Settings</Text>
+        {/* Location Settings Card */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <MaterialIcons name="location-on" size={20} color="#6C5CE7" />
+            <Text style={styles.cardTitle}>Location Settings</Text>
+          </View>
+          
           <TouchableOpacity 
             style={styles.visibilityToggle}
             onPress={toggleLocationVisibility}
             disabled={loading}
+            activeOpacity={0.8}
           >
-            <Text style={styles.visibilityText}>
-              Show my location to other users
-            </Text>
+            <View style={styles.toggleTextContainer}>
+              <Text style={styles.visibilityText}>
+                Show my location to other users
+              </Text>
+              <Text style={styles.visibilityDescription}>
+                {locationVisible 
+                  ? 'Your location is visible to other users'
+                  : 'Your location is hidden from other users'}
+              </Text>
+            </View>
+            
             <View style={[
               styles.toggleSwitch,
               locationVisible && styles.toggleSwitchActive
@@ -552,41 +630,46 @@ export default function EditProfileScreen() {
               ]} />
             </View>
           </TouchableOpacity>
-          <Text style={styles.visibilityDescription}>
-            {locationVisible 
-              ? 'Your location is visible to other users on the map.'
-              : 'Your location is hidden from other users on the map.'}
-          </Text>
         </View>
         
+        {/* Save Button */}
         <TouchableOpacity
           style={[styles.saveButton, loading && styles.saveButtonDisabled]}
           onPress={handleSaveProfile}
           disabled={loading}
+          activeOpacity={0.8}
         >
-          {loading ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <Text style={styles.saveButtonText}>Save Changes</Text>
-          )}
+          <LinearGradient
+            colors={loading ? ['#a29bfe', '#a29bfe'] : ['#6C5CE7', '#a29bfe']}
+            style={styles.saveButtonGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+          >
+            {loading ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.saveButtonText}>Save Changes</Text>
+            )}
+          </LinearGradient>
         </TouchableOpacity>
       </ScrollView>
-    </View>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f8f8',
+    backgroundColor: '#f5f5f5',
   },
   scrollContent: {
-    padding: 20,
+    paddingHorizontal: 16,
     paddingBottom: 40,
   },
   profileImageSection: {
     alignItems: 'center',
-    marginBottom: 24,
+    marginTop: 16,
+    marginBottom: 20,
   },
   profileImageContainer: {
     position: 'relative',
@@ -598,11 +681,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 8,
     overflow: 'hidden',
+    borderWidth: 5,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    elevation: 3,
   },
   profileImage: {
     width: 120,
     height: 120,
     borderRadius: 60,
+  },
+  placeholderImage: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#a29bfe',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   uploadingOverlay: {
     position: 'absolute',
@@ -616,7 +714,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 0,
     right: 0,
-    backgroundColor: '#007bff',
+    backgroundColor: '#6C5CE7',
     width: 36,
     height: 36,
     borderRadius: 18,
@@ -627,24 +725,86 @@ const styles = StyleSheet.create({
   },
   changePhotoText: {
     fontSize: 14,
-    color: '#007bff',
+    color: '#6C5CE7',
+    fontWeight: '500',
+  },
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    marginBottom: 16,
+    padding: CARD_PADDING,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    marginLeft: 8,
+  },
+  inputGroup: {
+    marginBottom: 16,
+  },
+  label: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  subLabel: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 12,
+  },
+  input: {
+    backgroundColor: '#f9f9f9',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 16,
+    color: '#333',
+  },
+  bioInput: {
+    backgroundColor: '#f9f9f9',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 16,
+    height: 120,
+    textAlignVertical: 'top',
+    color: '#333',
+  },
+  charCount: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'right',
+    marginTop: 4,
   },
   profileImagesGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'flex-start',
-    marginHorizontal: -5,
+    marginHorizontal: -6,
   },
   gridImageContainer: {
-    width: '33.33%',
+    width: (SCREEN_WIDTH - 32 - CARD_PADDING * 2 - 12) / 3,
     aspectRatio: 1,
-    padding: 5,
+    padding: 6,
     position: 'relative',
   },
   gridImage: {
     width: '100%',
     height: '100%',
-    borderRadius: 8,
+    borderRadius: 12,
   },
   removeImageButton: {
     position: 'absolute',
@@ -659,85 +819,49 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   addImageButton: {
-    width: '33.33%',
+    width: (SCREEN_WIDTH - 32 - CARD_PADDING * 2 - 12) / 3,
     aspectRatio: 1,
-    padding: 5,
+    padding: 6,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f0f8ff',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#cce5ff',
-    borderStyle: 'dashed',
+    backgroundColor: '#f3f0ff',
+    borderRadius: 12,
+    marginHorizontal: 6,
   },
   addImageText: {
-    fontSize: 12,
-    color: '#007bff',
+    fontSize: 14,
+    color: '#6C5CE7',
+    fontWeight: '500',
     marginTop: 8,
   },
-  section: {
-    marginBottom: 24,
-  },
-  label: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 8,
-  },
-  subLabel: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 12,
-  },
-  input: {
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-  },
-  bioInput: {
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    height: 120,
-    textAlignVertical: 'top',
-  },
-  charCount: {
-    fontSize: 12,
-    color: '#999',
-    textAlign: 'right',
-    marginTop: 4,
-  },
   interestsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     marginHorizontal: -4,
   },
   interestTag: {
-    backgroundColor: '#fff',
+    backgroundColor: '#f9f9f9',
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#e0e0e0',
     borderRadius: 20,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingVertical: 8,
     margin: 4,
   },
   interestTagSelected: {
-    backgroundColor: '#007bff',
-    borderColor: '#007bff',
+    backgroundColor: '#6C5CE7',
+    borderColor: '#6C5CE7',
   },
   interestText: {
     fontSize: 14,
     color: '#666',
+    fontWeight: '500',
   },
   interestTextSelected: {
     color: '#fff',
   },
   customInterestSection: {
-    marginTop: 16,
+    marginTop: 20,
   },
   customInterestInputContainer: {
     flexDirection: 'row',
@@ -745,23 +869,24 @@ const styles = StyleSheet.create({
   },
   customInterestInput: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#f9f9f9',
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
+    borderColor: '#e0e0e0',
+    borderRadius: 12,
+    padding: 14,
     fontSize: 16,
-    marginRight: 8,
+    marginRight: 10,
+    color: '#333',
   },
   addButton: {
-    backgroundColor: '#007bff',
-    borderRadius: 8,
+    backgroundColor: '#6C5CE7',
+    borderRadius: 12,
     paddingHorizontal: 16,
     justifyContent: 'center',
     alignItems: 'center',
   },
   addButtonDisabled: {
-    backgroundColor: '#99caff',
+    backgroundColor: '#a29bfe',
   },
   addButtonText: {
     color: '#fff',
@@ -776,7 +901,7 @@ const styles = StyleSheet.create({
   customInterestItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#e1f5fe',
+    backgroundColor: '#f3f0ff',
     borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -785,11 +910,12 @@ const styles = StyleSheet.create({
   },
   customInterestText: {
     fontSize: 14,
-    color: '#0288d1',
+    color: '#6C5CE7',
+    fontWeight: '500',
     marginRight: 8,
   },
   removeButton: {
-    backgroundColor: '#0288d1',
+    backgroundColor: '#6C5CE7',
     width: 20,
     height: 20,
     borderRadius: 10,
@@ -800,26 +926,34 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: '#f9f9f9',
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
+    borderColor: '#e0e0e0',
+    borderRadius: 12,
+    padding: 16,
+  },
+  toggleTextContainer: {
+    flex: 1,
   },
   visibilityText: {
     fontSize: 16,
     color: '#333',
+    fontWeight: '500',
+  },
+  visibilityDescription: {
+    fontSize: 14,
+    color: '#777',
+    marginTop: 4,
   },
   toggleSwitch: {
     width: 50,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#ccc',
+    backgroundColor: '#e0e0e0',
     padding: 2,
   },
   toggleSwitchActive: {
-    backgroundColor: '#34c759',
+    backgroundColor: '#a29bfe',
   },
   toggleBall: {
     width: 24,
@@ -830,20 +964,23 @@ const styles = StyleSheet.create({
   toggleBallActive: {
     transform: [{ translateX: 22 }],
   },
-  visibilityDescription: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 8,
-  },
   saveButton: {
-    backgroundColor: '#007bff',
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 20,
+    marginTop: 8,
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 30,
+    shadowColor: '#6C5CE7',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 5,
   },
   saveButtonDisabled: {
-    backgroundColor: '#99caff',
+    opacity: 0.8,
+  },
+  saveButtonGradient: {
+    paddingVertical: 16,
+    alignItems: 'center',
   },
   saveButtonText: {
     color: '#fff',
