@@ -32,6 +32,7 @@ import { db } from '@/config/firebase';
 import { useAuth } from '@/contexts/AuthContext';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import EnhancedUserMapMarker from '@/components/maps/EnhancedUserMapMarker';
+import MarkerSpiderfier from '@/components/maps/MarkerSpiderfier';
 import ProfileCard from '@/components/maps/ProfileCard';
 import FilterDrawer from '@/components/maps/FilterDrawer';
 import { router } from 'expo-router';
@@ -81,6 +82,11 @@ export default function MapScreen() {
     onlineOnly: false
   });
   const [filtersActive, setFiltersActive] = useState(false);
+  
+  // Spiderfier state for handling overlapping markers
+  const [spiderfiedMarkers, setSpiderfiedMarkers] = useState([]);
+  const [spiderfierBaseCoordinate, setSpiderfierBaseCoordinate] = useState(null);
+  const [showSpiderfier, setShowSpiderfier] = useState(false);
   
   // Location visibility state
   const [locationVisible, setLocationVisible] = useState(userData?.location?.visible || false);
@@ -366,11 +372,12 @@ export default function MapScreen() {
     }
   };
 
-  // Handle marker press
+  // Handle marker press - now with support for detecting overlapping markers
   const handleMarkerPress = (user) => {
     console.log('Marker pressed, user data:', {
       uid: user.uid,
       name: user.name,
+      position: `${user.latitude.toFixed(6)}, ${user.longitude.toFixed(6)}`,
       hasProfileImages: !!user.profileImages && Array.isArray(user.profileImages),
       profileImagesCount: user.profileImages?.length || 0,
       hasInterests: !!user.interests && Array.isArray(user.interests),
@@ -380,14 +387,58 @@ export default function MapScreen() {
       online: user.online
     });
     
+    // Check if this marker is part of a group of overlapping markers
+    // We identify these by the originalCoordinateGroup property we set during offsetting
+    if (user.originalCoordinateGroup && !showSpiderfier) {
+      // Get all markers that share the same original coordinate group
+      const markersInSameGroup = filteredUsers.filter(
+        m => m.originalCoordinateGroup === user.originalCoordinateGroup
+      );
+      
+      // If there are multiple markers in this group and they're not already spiderfied
+      if (markersInSameGroup.length > 1) {
+        // Set up the spiderfier
+        setSpiderfiedMarkers(markersInSameGroup);
+        setSpiderfierBaseCoordinate({
+          latitude: parseFloat(user.originalCoordinateGroup.split('_')[0]),
+          longitude: parseFloat(user.originalCoordinateGroup.split('_')[1])
+        });
+        setShowSpiderfier(true);
+        return; // Don't show profile card yet
+      }
+    }
+    
+    // If not part of an overlapping group, or already spiderfied, show the profile card
     setSelectedUser(user);
     setShowProfileCard(true);
+    
+    // Close the spiderfier if it's open
+    if (showSpiderfier) {
+      closeSpiderfier();
+    }
+  };
+  
+  // Handle closing the spiderfier
+  const handleCloseSpiderfier = () => {
+    closeSpiderfier();
+  };
+  
+  // Helper to close the spiderfier
+  const closeSpiderfier = () => {
+    setShowSpiderfier(false);
+    setSpiderfiedMarkers([]);
+    setSpiderfierBaseCoordinate(null);
   };
 
   // Handle profile card dismiss
   const handleDismissProfileCard = () => {
     setShowProfileCard(false);
     setTimeout(() => setSelectedUser(null), 300); // Delay clearing user to allow animation
+    
+    // Also close spiderfier if it's open
+    if (showSpiderfier) {
+      closeSpiderfier();
+    }
   };
 
   // Handle starting a chat
@@ -1008,6 +1059,12 @@ export default function MapScreen() {
             loadingEnabled={true}
             loadingBackgroundColor="#F5F5F5"
             loadingIndicatorColor="#007bff"
+            onPress={() => {
+              // Close spiderfier when map is tapped
+              if (showSpiderfier) {
+                closeSpiderfier();
+              }
+            }}
           >
             {/* Quarter mile radius circle */}
             <Circle
@@ -1022,7 +1079,7 @@ export default function MapScreen() {
             />
             
             {/* Nearby users markers - Using filtered users */}
-            {filteredUsers.map((nearbyUser, index) => {
+            {!showSpiderfier && filteredUsers.map((nearbyUser, index) => {
               if (nearbyUser.photoURL) {
                 console.log(`Rendering marker for user ${nearbyUser.uid} - profile image available`);
               }
@@ -1051,6 +1108,16 @@ export default function MapScreen() {
                 </Marker>
               );
             })}
+            
+            {/* Spiderfier component for showing overlapping markers */}
+            {showSpiderfier && spiderfiedMarkers.length > 0 && spiderfierBaseCoordinate && (
+              <MarkerSpiderfier
+                markers={spiderfiedMarkers}
+                baseCoordinate={spiderfierBaseCoordinate}
+                onMarkerPress={handleMarkerPress}
+                onClose={handleCloseSpiderfier}
+              />
+            )}
           </MapView>
           
           {/* Filter Drawer */}
@@ -1239,7 +1306,6 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 3,
   },
-
   infoPanel: {
     position: 'absolute',
     left: 16,
@@ -1273,5 +1339,30 @@ const styles = StyleSheet.create({
     color: '#ff6600',
     marginTop: 8,
     fontStyle: 'italic',
+  },
+  // Spiderfier styles
+  spiderMarkerContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  spiderLine: {
+    backgroundColor: 'rgba(0, 123, 255, 0.6)',
+    height: 2,
+  },
+  spiderCloseButton: {
+    backgroundColor: 'rgba(255, 0, 0, 0.8)',
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'white',
+  },
+  spiderCloseText: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+    textAlign: 'center',
   },
 });

@@ -40,23 +40,23 @@ export const createGeoHash = (latitude: number, longitude: number): string => {
 
 /**
  * Offset overlapping markers to make them all visible
- * This is a simple implementation that offsets markers in a circular pattern
+ * Improved implementation that better handles multiple overlapping markers
  */
 export const offsetOverlappingMarkers = (markers: any[]): any[] => {
-  const MIN_DISTANCE = 0.0001; // Minimum distance in degrees lat/lng
+  const MIN_DISTANCE = 0.00025; // Increased minimum distance in degrees lat/lng
   const result = [...markers];
   
-  // Simple algorithm for demonstration:
-  // 1. Sort markers by priority (e.g. tier)
-  // 2. For each marker, check if it's too close to any previous marker
-  // 3. If too close, offset it in a spiral pattern
+  // Enhanced algorithm:
+  // 1. Use a more precise method to detect overlapping
+  // 2. Use a spiral pattern with increasing distance for more markers
+  // 3. Consider marker size in the offset calculation
   
   // Group markers by location (with some tolerance)
   const locationGroups: {[key: string]: any[]} = {};
   
   markers.forEach(marker => {
-    // Create a key by rounding the coordinates
-    const key = `${marker.latitude.toFixed(5)}_${marker.longitude.toFixed(5)}`;
+    // Create a key by rounding the coordinates with higher precision
+    const key = `${marker.latitude.toFixed(6)}_${marker.longitude.toFixed(6)}`;
     
     if (!locationGroups[key]) {
       locationGroups[key] = [];
@@ -65,7 +65,7 @@ export const offsetOverlappingMarkers = (markers: any[]): any[] => {
     locationGroups[key].push(marker);
   });
   
-  // For each group with more than one marker, apply offsets
+  // For each group with more than one marker, apply more sophisticated offsets
   Object.values(locationGroups).forEach(group => {
     if (group.length <= 1) return;
     
@@ -83,21 +83,73 @@ export const offsetOverlappingMarkers = (markers: any[]): any[] => {
     });
     
     // Keep the first marker at its original position
-    // Offset the rest in a circle around it
     const baseMarker = group[0];
-    const radius = MIN_DISTANCE * 2;
     
-    for (let i = 1; i < group.length; i++) {
-      // Calculate angle for this marker's position in the circle
-      const angle = (i - 1) * (2 * Math.PI / (group.length - 1));
+    // For large groups, use a spiral pattern instead of a circle
+    const useSpiral = group.length > 8;
+    
+    // Add a small identifier to show original coordinate group
+    group.forEach((marker) => {
+      marker.originalCoordinateGroup = key;
+    });
+    
+    // Calculate scale based on marker's tier - larger markers need more space
+    const getScaleForTier = (tier: string): number => {
+      const tierScales: { [key: string]: number } = {
+        'soulmate': 1.5,
+        'bestFriend': 1.4,
+        'friend': 1.3,
+        'buddy': 1.2,
+        'casual': 1.0
+      };
       
-      // Calculate offset
-      const offsetLat = radius * Math.sin(angle);
-      const offsetLng = radius * Math.cos(angle);
+      return tierScales[tier] || 1.0;
+    };
+    
+    if (useSpiral) {
+      // Apply spiral pattern for many markers
+      const spiralAngleDelta = 2 * Math.PI / 6;  // How much to rotate per spiral
+      let currentRadius = MIN_DISTANCE;
+      let currentAngle = 0;
       
-      // Apply offset
-      group[i].latitude = baseMarker.latitude + offsetLat;
-      group[i].longitude = baseMarker.longitude + offsetLng;
+      for (let i = 1; i < group.length; i++) {
+        const marker = group[i];
+        const scale = getScaleForTier(marker.tier);
+        
+        // Calculate position on spiral
+        const offsetLat = currentRadius * Math.sin(currentAngle) * scale;
+        const offsetLng = currentRadius * Math.cos(currentAngle) * scale;
+        
+        // Apply offset
+        marker.latitude = baseMarker.latitude + offsetLat;
+        marker.longitude = baseMarker.longitude + offsetLng;
+        
+        // Increment angle and occasionally radius for spiral effect
+        currentAngle += spiralAngleDelta;
+        if (i % 6 === 0) {
+          currentRadius += MIN_DISTANCE / 2;
+        }
+      }
+    } else {
+      // For smaller groups, use a circle with scaled distances
+      for (let i = 1; i < group.length; i++) {
+        const marker = group[i];
+        const scale = getScaleForTier(marker.tier);
+        
+        // Calculate angle for this marker's position in the circle
+        const angle = (i - 1) * (2 * Math.PI / (group.length - 1));
+        
+        // Apply scaled radius based on tier
+        const radius = MIN_DISTANCE * scale;
+        
+        // Calculate offset
+        const offsetLat = radius * Math.sin(angle);
+        const offsetLng = radius * Math.cos(angle);
+        
+        // Apply offset
+        marker.latitude = baseMarker.latitude + offsetLat;
+        marker.longitude = baseMarker.longitude + offsetLng;
+      }
     }
   });
   
