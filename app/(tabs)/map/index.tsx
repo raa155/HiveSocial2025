@@ -259,7 +259,7 @@ export default function MapScreen() {
         acceptedAt: serverTimestamp()
       }, { merge: true });
       
-      // Create a chat room for these users
+      // Create a chat room for these users with all necessary data
       const chatRoomRef = await addDoc(collection(db, 'chatRooms'), {
         participants: [connectionData.senderId, connectionData.receiverId],
         connectionId: connectionId,
@@ -300,12 +300,10 @@ export default function MapScreen() {
       
       console.log(`Declining connection invitation ${connectionId}`);
       
-      // Delete the connection request
+      // Delete the connection request instead of just marking as declined
+      // This matches the behavior in the connections tab
       const connectionRef = doc(db, 'connectionRequests', connectionId);
-      await setDoc(connectionRef, {
-        status: 'declined',
-        declinedAt: serverTimestamp()
-      }, { merge: true });
+      await deleteDoc(connectionRef);
       
       Alert.alert('Success', 'Connection declined');
       handleDismissProfileCard();
